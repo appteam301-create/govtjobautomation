@@ -101,7 +101,13 @@ class ProcessDiscoveredDocument implements ShouldQueue
         ];
         if(in_array($t,$generic,true)) return false;
 
-        if(preg_match('/^(extension of last date|corrigendum|addendum|amendment|revised notice|notice regarding|important notice|expression of interest)\b/u',$t)) return false;
+        if(preg_match('/^(extension of last date|corrigendum|addendum|amendment|revised notice|notice regarding|important notice|expression of interest|know your|home ?notices?|home organisation)\\b/u',$t)) return false;
+        if(preg_match('/^(central public info(?:rmation)? officer|tentative vacancy|deputy director of public instruction)$/u',$t)) return false;
+        $navHits=0;
+        foreach(['about','contact','rti','faq','photos','videos','publications','forms','manuals','press release','resources','conference','home'] as $nav){
+            if(str_contains($t,$nav)) $navHits++;
+        }
+        if($navHits>=4) return false;
         if(preg_match('/\\b(final result|provisional result|document verification|admit card|hall ticket|answer key|merit list|shortlist|shortlisted|eligibility list|interview schedule|exam schedule|examination schedule|objection|response sheet|cut[ -]?off|appointment order|tender|procurement|auction|closed|archived|cancelled|cancellation)\\b/u',$t)) return false;
 
         $positive='/\\b(recruit(?:ment|ing)?|vacanc(?:y|ies)|applications? invited|walk[ -]?in|apprentice(?:ship)?|engagement of|post(?:s)? of|hiring|agniveer|constable|sub[ -]?inspector|inspector|senior resident|junior resident|medical consultant|bank.?s medical consultant|assistant professor|associate professor|professor|director|registrar|librarian|accountant|scientist|research (?:associate|fellow|scientist)|project (?:staff|associate|assistant|scientist|technical|officer)|technologist|technical officer|staff nurse|engineer|officer|assistant|clerk|manager|executive|technician|stenographer|trainee|fellowship|tutor|demonstrator|driver|attendant|tradesman|multi[ -]?tasking staff|mts|data entry operator|deo)\\b/u';
