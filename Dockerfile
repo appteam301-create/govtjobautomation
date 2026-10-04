@@ -14,6 +14,9 @@ RUN cat /tmp/deploy/payload.part1 /tmp/deploy/payload.part2 /tmp/deploy/payload.
     | base64 -d | tar xz -C /app \
     && cp -f /tmp/deploy/overrides/config/*.php /app/config/ \
     && cp -f /tmp/deploy/overrides/composer.json /app/composer.json \
+    && cp -f /tmp/deploy/overrides/routes/web.php /app/routes/web.php \
+    && cp -f /tmp/deploy/overrides/bootstrap/app.php /app/bootstrap/app.php \
+    && cp -rf /tmp/deploy/overrides/app/* /app/app/ \
     && COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist \
     && mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \
     && chmod -R 775 storage bootstrap/cache
