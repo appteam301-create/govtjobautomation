@@ -18,7 +18,7 @@ class CrawlGovernmentSource implements ShouldQueue
 {
     use Queueable;
     public int $tries=1;
-    public int $timeout=180;
+    public int $timeout=150;
 
     public function __construct(public int $sourceId){}
 
@@ -30,65 +30,67 @@ class CrawlGovernmentSource implements ShouldQueue
         BrowserRenderer $browser
     ): void {
         $source=GovernmentSource::findOrFail($this->sourceId);
-        $run=CrawlRun::create([
-            'government_source_id'=>$source->id,
-            'started_at'=>now(),
-            'status'=>'running'
-        ]);
+        $run=CrawlRun::create(['government_source_id'=>$source->id,'started_at'=>now(),'status'=>'running']);
 
         try{
             $settings=$source->settings??[];
             $mode=$source->crawler_mode;
             $forceBrowser=(bool)($settings['force_browser']??false);
-            $html='';
             $baseUrl=$source->recruitment_url;
             $httpStatus=null;
-            $fetchError=null;
+            $items=[];
+            $httpError=null;
+            $browserError=null;
 
-            if(!$forceBrowser && $mode!==CrawlerMode::Js){
-                try{
-                    $result=$fetcher->fetch($source->recruitment_url);
-                    $html=$result->body;
-                    $baseUrl=$result->url;
-                    $httpStatus=$result->status;
-                }catch(\Throwable $e){
-                    $fetchError=$e;
-                }
+            // Always try normal HTTP first. Even JS portals often expose useful links in server HTML.
+            try{
+                $result=$fetcher->fetch($source->recruitment_url);
+                $baseUrl=$result->url;
+                $httpStatus=$result->status;
+                $items=$discovery->discover($result->body,$baseUrl);
+            }catch(\Throwable $e){
+                $httpError=$e;
             }
 
-            if($html===''){
-                $html=$browser->render($source->recruitment_url);
-                $baseUrl=$source->recruitment_url;
-                $httpStatus=$httpStatus??200;
-            }
-
-            $items=$discovery->discover($html,$baseUrl);
-
-            if(!$forceBrowser && $mode===CrawlerMode::Auto && count($items)<8){
+            $needBrowser=$forceBrowser || $mode===CrawlerMode::Js || ($mode===CrawlerMode::Auto && count($items)<8);
+            if($needBrowser){
                 try{
                     $rendered=$browser->render($source->recruitment_url);
                     $renderedItems=$discovery->discover($rendered,$source->recruitment_url);
                     if(count($renderedItems)>count($items)) $items=$renderedItems;
-                }catch(\Throwable $e){}
+                    $httpStatus=$httpStatus??200;
+                }catch(\Throwable $e){
+                    $browserError=$e;
+                }
+            }
+
+            // A browser timeout is not a source failure if HTTP still returned a usable page.
+            if(!$items && $httpError && $browserError){
+                throw new \RuntimeException('HTTP fetch failed: '.$httpError->getMessage().' | Browser: '.$browserError->getMessage());
+            }
+            if(!$items && $httpError && !$browserError){
+                throw $httpError;
             }
 
             $listing=(bool)($settings['listing_is_recruitment']??false);
-            $max=max(10,min(120,(int)($settings['max_items']??80)));
-            $keywords=['recruit','vacan','career','job','advert','advt','apply','appointment','apprent','faculty','non-faculty','project','fellow','resident','consultant','trainee','position','officer','assistant','engineer','technician','clerk','manager','executive','medical officer','staff nurse','professor'];
-            $bad='/\b(result|admit card|answer key|merit list|shortlist|shortlisted|tender|procurement|auction|objection|cut[ -]?off|interview schedule|exam schedule)\b/u';
+            $max=max(10,min(100,(int)($settings['max_items']??60)));
+            $positive='/\b(recruit(?:ment|ing)?|vacanc(?:y|ies)|applications? invited|walk[ -]?in|apprentice(?:ship)?|engagement|post(?:s)?|hiring|resident|consultant|professor|research (?:associate|fellow|scientist)|project (?:staff|associate|assistant|scientist|technical|officer)|technologist|technical officer|staff nurse|engineer|officer|assistant|clerk|manager|executive|technician|stenographer|trainee|fellowship|tutor|demonstrator)\b/u';
+            $bad='/\b(final result|provisional result|document verification|admit card|answer key|merit list|shortlist|shortlisted|eligibility list|tender|procurement|auction|objection|cut[ -]?off|interview schedule|exam schedule|expression of interest)\b/u';
 
             $scored=[];
             foreach($items as $item){
-                $hay=mb_strtolower(($item['title']??'').' '.($item['url']??''));
-                if(preg_match($bad,$hay)) continue;
+                $title=mb_strtolower(trim((string)($item['title']??'')));
+                if($title==='' || mb_strlen($title)<8 || mb_strlen($title)>420) continue;
+                if(preg_match($bad,$title)) continue;
+                if(preg_match('/^(extension of last date|corrigendum|addendum|amendment|revised notice|notice regarding|important notice)\b/u',$title)) continue;
 
-                $score=(($item['type']??'')==='pdf')?3:0;
-                foreach($keywords as $k){
-                    if(str_contains($hay,$k)){ $score+=2; }
-                }
+                $generic=['vacancy','vacancies','all vacancies','recruitment','recruitments','jobs','career','careers','application form','apply online','faculty','project','english','hindi','know more about vacancies','vision document','रिक्तियां','भर्ती','देखें'];
+                if(in_array($title,$generic,true)) continue;
 
-                if($score===0) continue;
-                if(!$listing && $score<2) continue;
+                $score=preg_match($positive,$title)?4:0;
+                if(($item['type']??'')==='pdf') $score+=2;
+                if(!$listing && $score<4) continue;
+                if($listing && $score<2) continue;
                 $scored[]=['score'=>$score,'item'=>$item];
             }
 
@@ -118,25 +120,18 @@ class CrawlGovernmentSource implements ShouldQueue
             }
 
             $run->update([
-                'status'=>'success',
-                'finished_at'=>now(),
-                'http_status'=>$httpStatus,
+                'status'=>'success','finished_at'=>now(),'http_status'=>$httpStatus,
                 'metrics'=>[
-                    'candidate_links'=>count($items),
-                    'new_documents'=>$new,
-                    'http_fallback_error'=>$fetchError?mb_substr($fetchError->getMessage(),0,250):null
+                    'candidate_links'=>count($items),'new_documents'=>$new,
+                    'http_error'=>$httpError?mb_substr($httpError->getMessage(),0,250):null,
+                    'browser_error'=>$browserError?mb_substr($browserError->getMessage(),0,250):null
                 ]
             ]);
 
-            $source->update([
-                'last_crawled_at'=>now(),
-                'next_crawl_at'=>now()->addMinutes($source->check_frequency_minutes)
+            $source->update(['last_crawled_at'=>now(),'next_crawl_at'=>now()->addMinutes($source->check_frequency_minutes)]);
+            CrawlerHealth::updateOrCreate(['government_source_id'=>$source->id],[
+                'status'=>'healthy','consecutive_failures'=>0,'last_success_at'=>now(),'last_error'=>null
             ]);
-
-            CrawlerHealth::updateOrCreate(
-                ['government_source_id'=>$source->id],
-                ['status'=>'healthy','consecutive_failures'=>0,'last_success_at'=>now(),'last_error'=>null]
-            );
         }catch(\Throwable $e){
             $run->update(['status'=>'failed','finished_at'=>now(),'error'=>$e->getMessage()]);
             $h=CrawlerHealth::firstOrNew(['government_source_id'=>$source->id]);
