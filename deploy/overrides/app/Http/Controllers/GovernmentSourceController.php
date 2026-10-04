@@ -3,7 +3,6 @@ namespace App\Http\Controllers;
 
 use App\Enums\CrawlerMode;
 use App\Enums\SourceStatus;
-use App\Jobs\CrawlGovernmentSource;
 use App\Models\GovernmentSource;
 use App\Services\Security\UrlGuard;
 use Illuminate\Http\Request;
@@ -32,30 +31,23 @@ class GovernmentSourceController extends Controller
 
     public function crawlAll()
     {
-        $sourceIds = GovernmentSource::query()
+        $active = GovernmentSource::query()
             ->where('status', SourceStatus::Active->value)
-            ->orderBy('id')
-            ->pluck('id')
-            ->all();
+            ->count();
 
-        if (!$sourceIds) {
+        if ($active === 0) {
             return back()->with('error','No active sources are available to crawl.');
         }
 
-        app()->terminating(function () use ($sourceIds) {
-            foreach ($sourceIds as $sourceId) {
-                try {
-                    CrawlGovernmentSource::dispatchSync($sourceId);
-                } catch (\Throwable $e) {
-                    report($e);
-                    // Continue with the next source even if one site fails.
-                }
-            }
-        });
+        $php = escapeshellarg(PHP_BINARY);
+        $script = escapeshellarg(base_path('bin/crawl-all.php'));
+        $log = escapeshellarg(storage_path('logs/crawl-all-launch.log'));
+
+        exec("nohup {$php} {$script} >> {$log} 2>&1 &");
 
         return back()->with(
             'status',
-            'Crawl started for '.count($sourceIds).' active sources. They will be checked one by one using the existing crawler logic.'
+            "Crawl started in background for {$active} active sources. Sites are checked one by one using the existing crawler logic."
         );
     }
 
