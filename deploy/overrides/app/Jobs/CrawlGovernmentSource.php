@@ -33,21 +33,40 @@ class CrawlGovernmentSource implements ShouldQueue
         $run=CrawlRun::create(['government_source_id'=>$source->id,'started_at'=>now(),'status'=>'running']);
 
         try{
-            $result=$fetcher->fetch($source->recruitment_url);
-            $html=$result->body;
-            $items=$discovery->discover($html,$result->url);
-
             $settings=$source->settings??[];
-            $forceBrowser=(bool)($settings['force_browser']??false);
             $mode=$source->crawler_mode;
+            $forceBrowser=(bool)($settings['force_browser']??false);
+            $html='';
+            $baseUrl=$source->recruitment_url;
+            $httpStatus=null;
+            $fetchError=null;
 
-            if($forceBrowser || $mode===CrawlerMode::Js || ($mode===CrawlerMode::Auto && count($items)<8)){
+            if(!$forceBrowser && $mode!==CrawlerMode::Js){
+                try{
+                    $result=$fetcher->fetch($source->recruitment_url);
+                    $html=$result->body;
+                    $baseUrl=$result->url;
+                    $httpStatus=$result->status;
+                }catch(\Throwable $e){
+                    $fetchError=$e;
+                }
+            }
+
+            if($html===''){
+                $html=$browser->render($source->recruitment_url);
+                $baseUrl=$source->recruitment_url;
+                $httpStatus=$httpStatus??200;
+            }
+
+            $items=$discovery->discover($html,$baseUrl);
+
+            if(!$forceBrowser && $mode===CrawlerMode::Auto && count($items)<8){
                 try{
                     $rendered=$browser->render($source->recruitment_url);
                     $renderedItems=$discovery->discover($rendered,$source->recruitment_url);
                     if(count($renderedItems)>count($items)) $items=$renderedItems;
                 }catch(\Throwable $e){
-                    // Browser rendering is fallback; normal HTML crawling can still continue.
+                    // Keep HTTP-discovered items if browser fallback is unavailable.
                 }
             }
 
@@ -55,7 +74,7 @@ class CrawlGovernmentSource implements ShouldQueue
             $max=max(10,min(120,(int)($settings['max_items']??80)));
             $items=array_values(array_filter($items,function(array $item) use ($listing){
                 $hay=mb_strtolower(($item['title']??'').' '.($item['url']??''));
-                if(preg_match('/\b(result|admit card|answer key|merit list|shortlist|tender|procurement|auction)\b/u',$hay)) return false;
+                if(preg_match('/\b(result|admit card|answer key|merit list|shortlist|tender|procurement|auction|corrigendum only)\b/u',$hay)) return false;
                 if($listing && (($item['type']??'')==='pdf')) return true;
                 $keywords=['recruit','vacan','career','job','advert','advt','apply','appointment','apprent','faculty','non-faculty','project','fellow','resident','consultant','trainee','position','notification'];
                 foreach($keywords as $k) if(str_contains($hay,$k)) return true;
@@ -78,13 +97,16 @@ class CrawlGovernmentSource implements ShouldQueue
                     'document_type'=>$item['type'],
                     'content_hash'=>$fingerprint,
                     'raw_text'=>$item['title'],
-                    'metadata'=>['discovered_from'=>$result->url],
+                    'metadata'=>['discovered_from'=>$baseUrl],
                     'discovered_at'=>now()
                 ]);
-                ProcessDiscoveredDocument::dispatch($doc->id);
+                ProcessDiscoveredDocument::dispatchSync($doc->id);
             }
 
-            $run->update(['status'=>'success','finished_at'=>now(),'http_status'=>$result->status,'metrics'=>['links'=>count($items),'new'=>$new]]);
+            $run->update([
+                'status'=>'success','finished_at'=>now(),'http_status'=>$httpStatus,
+                'metrics'=>['links'=>count($items),'new'=>$new,'http_fallback_error'=>$fetchError?mb_substr($fetchError->getMessage(),0,250):null]
+            ]);
             $source->update(['last_crawled_at'=>now(),'next_crawl_at'=>now()->addMinutes($source->check_frequency_minutes)]);
             CrawlerHealth::updateOrCreate(['government_source_id'=>$source->id],['status'=>'healthy','consecutive_failures'=>0,'last_success_at'=>now(),'last_error'=>null]);
         }catch(\Throwable $e){
