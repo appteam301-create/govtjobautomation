@@ -17,7 +17,7 @@ use Illuminate\Foundation\Queue\Queueable;
 class CrawlGovernmentSource implements ShouldQueue
 {
     use Queueable;
-    public int $tries=2;
+    public int $tries=1;
     public int $timeout=180;
 
     public function __construct(public int $sourceId){}
@@ -30,7 +30,11 @@ class CrawlGovernmentSource implements ShouldQueue
         BrowserRenderer $browser
     ): void {
         $source=GovernmentSource::findOrFail($this->sourceId);
-        $run=CrawlRun::create(['government_source_id'=>$source->id,'started_at'=>now(),'status'=>'running']);
+        $run=CrawlRun::create([
+            'government_source_id'=>$source->id,
+            'started_at'=>now(),
+            'status'=>'running'
+        ]);
 
         try{
             $settings=$source->settings??[];
@@ -65,29 +69,38 @@ class CrawlGovernmentSource implements ShouldQueue
                     $rendered=$browser->render($source->recruitment_url);
                     $renderedItems=$discovery->discover($rendered,$source->recruitment_url);
                     if(count($renderedItems)>count($items)) $items=$renderedItems;
-                }catch(\Throwable $e){
-                    // Keep HTTP-discovered items if browser fallback is unavailable.
-                }
+                }catch(\Throwable $e){}
             }
 
             $listing=(bool)($settings['listing_is_recruitment']??false);
             $max=max(10,min(120,(int)($settings['max_items']??80)));
-            $items=array_values(array_filter($items,function(array $item) use ($listing){
+            $keywords=['recruit','vacan','career','job','advert','advt','apply','appointment','apprent','faculty','non-faculty','project','fellow','resident','consultant','trainee','position','officer','assistant','engineer','technician','clerk','manager','executive','medical officer','staff nurse','professor'];
+            $bad='/\b(result|admit card|answer key|merit list|shortlist|shortlisted|tender|procurement|auction|objection|cut[ -]?off|interview schedule|exam schedule)\b/u';
+
+            $scored=[];
+            foreach($items as $item){
                 $hay=mb_strtolower(($item['title']??'').' '.($item['url']??''));
-                if(preg_match('/\b(result|admit card|answer key|merit list|shortlist|tender|procurement|auction|corrigendum only)\b/u',$hay)) return false;
-                if($listing && (($item['type']??'')==='pdf')) return true;
-                $keywords=['recruit','vacan','career','job','advert','advt','apply','appointment','apprent','faculty','non-faculty','project','fellow','resident','consultant','trainee','position','notification'];
-                foreach($keywords as $k) if(str_contains($hay,$k)) return true;
-                return $listing;
-            }));
-            $items=array_slice($items,0,$max);
+                if(preg_match($bad,$hay)) continue;
+
+                $score=(($item['type']??'')==='pdf')?3:0;
+                foreach($keywords as $k){
+                    if(str_contains($hay,$k)){ $score+=2; }
+                }
+
+                if($score===0) continue;
+                if(!$listing && $score<2) continue;
+                $scored[]=['score'=>$score,'item'=>$item];
+            }
+
+            usort($scored,fn($a,$b)=>$b['score']<=>$a['score']);
+            $items=array_slice(array_map(fn($x)=>$x['item'],$scored),0,$max);
 
             $new=0;
             foreach($items as $item){
                 $normalized=$norm->url($item['url']);
                 $fingerprint=$norm->hash($normalized.'|'.mb_strtolower($item['title']??''));
                 if(!$changes->isNew($source,$fingerprint,$item)) continue;
-                $new++;
+
                 $doc=DiscoveredDocument::create([
                     'government_source_id'=>$source->id,
                     'crawl_run_id'=>$run->id,
@@ -101,14 +114,29 @@ class CrawlGovernmentSource implements ShouldQueue
                     'discovered_at'=>now()
                 ]);
                 ProcessDiscoveredDocument::dispatchSync($doc->id);
+                $new++;
             }
 
             $run->update([
-                'status'=>'success','finished_at'=>now(),'http_status'=>$httpStatus,
-                'metrics'=>['links'=>count($items),'new'=>$new,'http_fallback_error'=>$fetchError?mb_substr($fetchError->getMessage(),0,250):null]
+                'status'=>'success',
+                'finished_at'=>now(),
+                'http_status'=>$httpStatus,
+                'metrics'=>[
+                    'candidate_links'=>count($items),
+                    'new_documents'=>$new,
+                    'http_fallback_error'=>$fetchError?mb_substr($fetchError->getMessage(),0,250):null
+                ]
             ]);
-            $source->update(['last_crawled_at'=>now(),'next_crawl_at'=>now()->addMinutes($source->check_frequency_minutes)]);
-            CrawlerHealth::updateOrCreate(['government_source_id'=>$source->id],['status'=>'healthy','consecutive_failures'=>0,'last_success_at'=>now(),'last_error'=>null]);
+
+            $source->update([
+                'last_crawled_at'=>now(),
+                'next_crawl_at'=>now()->addMinutes($source->check_frequency_minutes)
+            ]);
+
+            CrawlerHealth::updateOrCreate(
+                ['government_source_id'=>$source->id],
+                ['status'=>'healthy','consecutive_failures'=>0,'last_success_at'=>now(),'last_error'=>null]
+            );
         }catch(\Throwable $e){
             $run->update(['status'=>'failed','finished_at'=>now(),'error'=>$e->getMessage()]);
             $h=CrawlerHealth::firstOrNew(['government_source_id'=>$source->id]);
