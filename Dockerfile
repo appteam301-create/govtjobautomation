@@ -1,8 +1,8 @@
 FROM php:8.4-cli-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git unzip curl poppler-utils tesseract-ocr chromium libzip-dev libicu-dev libonig-dev libsqlite3-dev \
-    && docker-php-ext-install pdo_mysql pdo_sqlite mbstring intl zip \
+    git unzip curl poppler-utils tesseract-ocr chromium libzip-dev libicu-dev libonig-dev libsqlite3-dev libxml2-dev \
+    && docker-php-ext-install pdo_mysql pdo_sqlite mbstring intl zip dom \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
@@ -33,4 +33,4 @@ ENV CRAWLER_USER_AGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrom
 
 EXPOSE 8080
 
-CMD sh -c 'if [ "${DB_CONNECTION:-sqlite}" = "sqlite" ]; then mkdir -p "$(dirname "${DB_DATABASE:-/data/database.sqlite}")" && touch "${DB_DATABASE:-/data/database.sqlite}"; fi; php artisan migrate --force && php /app/bin/bootstrap-production.php && php artisan optimize:clear && php artisan serve --host=0.0.0.0 --port=${PORT:-8080}'
+CMD sh -c 'if [ "${DB_CONNECTION:-sqlite}" = "sqlite" ]; then mkdir -p "$(dirname "${DB_DATABASE:-/data/database.sqlite}")" && touch "${DB_DATABASE:-/data/database.sqlite}"; fi; php artisan migrate --force && php /app/bin/bootstrap-production.php && php artisan optimize:clear && php /app/bin/crawler-daemon.php >> /app/storage/logs/crawler-daemon.log 2>&1 & exec php artisan serve --host=0.0.0.0 --port=${PORT:-8080}'
