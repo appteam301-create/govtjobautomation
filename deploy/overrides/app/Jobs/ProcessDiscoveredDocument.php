@@ -35,7 +35,7 @@ class ProcessDiscoveredDocument implements ShouldQueue
 
         // Result/DV/answer-key/update pages must never become new job rows.
         $head=mb_strtolower(mb_substr($title.' '.$raw,0,2500));
-        if(preg_match('/\b(final result|provisional result|document verification|admit card|hall ticket|answer key|merit list|shortlist|shortlisted|eligibility list|interview schedule|exam schedule|examination schedule|objection|response sheet|cut[ -]?off|appointment order)\b/u',$head)) return;
+        if(preg_match('/\\b(final result|provisional result|document verification|admit card|hall ticket|answer key|merit list|shortlist|shortlisted|eligibility list|interview schedule|exam schedule|examination schedule|objection|response sheet|cut[ -]?off|appointment order|closed|archived|cancelled|cancellation)\\b/u',$head)) return;
 
         $jobTitle=$this->cleanTitle($title);
         if(!$this->looksLikeRealJob($jobTitle)) return;
@@ -102,7 +102,7 @@ class ProcessDiscoveredDocument implements ShouldQueue
         if(in_array($t,$generic,true)) return false;
 
         if(preg_match('/^(extension of last date|corrigendum|addendum|amendment|revised notice|notice regarding|important notice|expression of interest)\b/u',$t)) return false;
-        if(preg_match('/\b(final result|provisional result|document verification|admit card|hall ticket|answer key|merit list|shortlist|shortlisted|eligibility list|interview schedule|exam schedule|examination schedule|objection|response sheet|cut[ -]?off|appointment order|tender|procurement|auction)\b/u',$t)) return false;
+        if(preg_match('/\\b(final result|provisional result|document verification|admit card|hall ticket|answer key|merit list|shortlist|shortlisted|eligibility list|interview schedule|exam schedule|examination schedule|objection|response sheet|cut[ -]?off|appointment order|tender|procurement|auction|closed|archived|cancelled|cancellation)\\b/u',$t)) return false;
 
         $positive='/\\b(recruit(?:ment|ing)?|vacanc(?:y|ies)|applications? invited|walk[ -]?in|apprentice(?:ship)?|engagement of|post(?:s)? of|hiring|agniveer|constable|sub[ -]?inspector|inspector|senior resident|junior resident|medical consultant|bank.?s medical consultant|assistant professor|associate professor|professor|director|registrar|librarian|accountant|scientist|research (?:associate|fellow|scientist)|project (?:staff|associate|assistant|scientist|technical|officer)|technologist|technical officer|staff nurse|engineer|officer|assistant|clerk|manager|executive|technician|stenographer|trainee|fellowship|tutor|demonstrator|driver|attendant|tradesman|multi[ -]?tasking staff|mts|data entry operator|deo)\\b/u';
         return (bool)preg_match($positive,$t);
