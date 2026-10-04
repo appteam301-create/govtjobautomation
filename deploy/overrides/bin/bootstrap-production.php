@@ -10,7 +10,7 @@ require __DIR__.'/../vendor/autoload.php';
 $app=require __DIR__.'/../bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
 
-$marker='/data/source-catalog-v20261004-5.done';
+$marker='/data/source-catalog-v20261004-6.done';
 if(is_file($marker)) exit(0);
 
 $sources=require __DIR__.'/../config/govjob_sources.php';
