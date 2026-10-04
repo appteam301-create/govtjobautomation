@@ -27,18 +27,36 @@ class GovernmentSourceController extends Controller
         $data['status']=SourceStatus::Active;
         $data['next_crawl_at']=now();
         $source=GovernmentSource::create($data);
-        return redirect()->route('sources.index')->with('status','Source added: '.$source->name);
+        return redirect('/sources')->with('status','Source added: '.$source->name);
     }
 
-    public function crawl(GovernmentSource $source)
+    public function crawlAll()
     {
-        try {
-            CrawlGovernmentSource::dispatch($source->id);
-            return back()->with('status','Crawl completed/queued for '.$source->name.'.');
-        } catch (\Throwable $e) {
-            report($e);
-            return back()->with('error','Crawl failed: '.$e->getMessage());
+        $sourceIds = GovernmentSource::query()
+            ->where('status', SourceStatus::Active->value)
+            ->orderBy('id')
+            ->pluck('id')
+            ->all();
+
+        if (!$sourceIds) {
+            return back()->with('error','No active sources are available to crawl.');
         }
+
+        app()->terminating(function () use ($sourceIds) {
+            foreach ($sourceIds as $sourceId) {
+                try {
+                    CrawlGovernmentSource::dispatchSync($sourceId);
+                } catch (\Throwable $e) {
+                    report($e);
+                    // Continue with the next source even if one site fails.
+                }
+            }
+        });
+
+        return back()->with(
+            'status',
+            'Crawl started for '.count($sourceIds).' active sources. They will be checked one by one using the existing crawler logic.'
+        );
     }
 
     public function toggle(GovernmentSource $source)
