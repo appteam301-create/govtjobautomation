@@ -13,7 +13,8 @@ COPY deploy /tmp/deploy
 RUN cat /tmp/deploy/payload.part1 /tmp/deploy/payload.part2 /tmp/deploy/payload.part3 /tmp/deploy/payload.part4 \
     | base64 -d | tar xz -C /app \
     && cp -f /tmp/deploy/overrides/config/*.php /app/config/ \
-    && composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist \
+    && cp -f /tmp/deploy/overrides/composer.json /app/composer.json \
+    && COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist \
     && mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \
     && chmod -R 775 storage bootstrap/cache
 
