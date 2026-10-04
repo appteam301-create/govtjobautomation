@@ -52,7 +52,7 @@ class CrawlGovernmentSource implements ShouldQueue
                 $httpError=$e;
             }
 
-            $needBrowser=$forceBrowser || $mode===CrawlerMode::Js || ($mode===CrawlerMode::Auto && count($items)<8);
+            $needBrowser=$httpError !== null || $forceBrowser || $mode===CrawlerMode::Js || ($mode===CrawlerMode::Auto && count($items)<8);
             if($needBrowser){
                 try{
                     $rendered=$browser->render($source->recruitment_url);
