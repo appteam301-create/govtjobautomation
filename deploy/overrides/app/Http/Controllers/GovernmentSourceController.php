@@ -6,10 +6,21 @@ use App\Enums\SourceStatus;
 use App\Models\GovernmentSource;
 use App\Services\Security\UrlGuard;
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
 
 class GovernmentSourceController extends Controller
 {
-    public function index(){ return view('sources.index',['sources'=>GovernmentSource::latest()->paginate(30)]); }
+    private string $statusPath = '/data/crawl-all-status.json';
+    private string $stopPath = '/data/crawl-stop.flag';
+
+    public function index()
+    {
+        return view('sources.index',[
+            'sources'=>GovernmentSource::latest()->paginate(100),
+            'crawlerStatus'=>$this->readStatus(),
+        ]);
+    }
+
     public function create(){ return view('sources.create'); }
 
     public function store(Request $request, UrlGuard $guard)
@@ -39,16 +50,25 @@ class GovernmentSourceController extends Controller
             return back()->with('error','No active sources are available to crawl.');
         }
 
+        @unlink($this->stopPath);
+
         $php = escapeshellarg(PHP_BINARY);
         $script = escapeshellarg(base_path('bin/crawl-all.php'));
         $log = escapeshellarg(storage_path('logs/crawl-all-launch.log'));
-
         exec("nohup {$php} {$script} >> {$log} 2>&1 &");
 
-        return back()->with(
-            'status',
-            "Crawl started in background for {$active} active sources. Sites are checked one by one using the existing crawler logic."
-        );
+        return back()->with('status',"Crawler started/resumed for {$active} active sources.");
+    }
+
+    public function stopAll()
+    {
+        @file_put_contents($this->stopPath, now()->toIso8601String());
+        return back()->with('status','Stop requested. The crawler will finish the current website, then pause before the next website.');
+    }
+
+    public function crawlStatus(): JsonResponse
+    {
+        return response()->json($this->readStatus());
     }
 
     public function toggle(GovernmentSource $source)
@@ -56,5 +76,15 @@ class GovernmentSourceController extends Controller
         $source->status=$source->status===SourceStatus::Active ? SourceStatus::Paused : SourceStatus::Active;
         $source->save();
         return back()->with('status','Source status updated.');
+    }
+
+    private function readStatus(): array
+    {
+        if (!is_file($this->statusPath)) {
+            return ['status'=>'idle','processed'=>0,'total'=>0,'current_source_id'=>null,'sources'=>[]];
+        }
+
+        $data=json_decode((string)@file_get_contents($this->statusPath),true);
+        return is_array($data) ? $data : ['status'=>'idle','processed'=>0,'total'=>0,'current_source_id'=>null,'sources'=>[]];
     }
 }
