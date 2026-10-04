@@ -1,0 +1,26 @@
+FROM php:8.4-cli-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git unzip curl poppler-utils tesseract-ocr libzip-dev libicu-dev libonig-dev \
+    && docker-php-ext-install pdo_mysql pdo_sqlite mbstring intl zip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+WORKDIR /app
+COPY deploy /tmp/deploy
+
+RUN cat /tmp/deploy/payload.part1 /tmp/deploy/payload.part2 /tmp/deploy/payload.part3 /tmp/deploy/payload.part4 \
+    | base64 -d | tar xz -C /app \
+    && cp -f /tmp/deploy/overrides/config/*.php /app/config/ \
+    && composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist \
+    && mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \
+    && chmod -R 775 storage bootstrap/cache
+
+ENV APP_ENV=production
+ENV APP_DEBUG=false
+ENV LOG_CHANNEL=stderr
+
+EXPOSE 8080
+
+CMD sh -c 'if [ "${DB_CONNECTION:-sqlite}" = "sqlite" ]; then mkdir -p "$(dirname "${DB_DATABASE:-/data/database.sqlite}")" && touch "${DB_DATABASE:-/data/database.sqlite}"; fi; php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=${PORT:-8080}'
