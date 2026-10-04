@@ -101,7 +101,7 @@ return [
   [
     'source_key'=>'aiims-jodhpur', 'name'=>'AIIMS Jodhpur Recruitment', 'organization'=>'AIIMS Jodhpur',
     'government_level'=>'Central', 'state'=>'Rajasthan', 'department'=>null,
-    'official_domain'=>'aiimsjodhpur.edu.in', 'recruitment_url'=>'https://www.aiimsjodhpur.edu.in/index.php', 'crawler_mode'=>'AUTO',
+    'official_domain'=>'aiimsjodhpur.edu.in', 'recruitment_url'=>'https://aiimsjodhpur.edu.in/index.php', 'crawler_mode'=>'AUTO',
     'source_order'=>15, 'check_frequency_minutes'=>360,
     'settings'=>['source_key'=>'aiims-jodhpur','source_order'=>15,'listing_is_recruitment'=>true,'force_browser'=>false,'max_items'=>80,'verified'=>true],
   ],
