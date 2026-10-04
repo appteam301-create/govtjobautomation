@@ -5,25 +5,26 @@ use App\Enums\CrawlerMode;
 use App\Enums\SourceStatus;
 use App\Models\GovernmentSource;
 use App\Services\Security\UrlGuard;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class GovernmentSourceController extends Controller
 {
-    private string $statusPath = '/data/crawl-all-status.json';
-    private string $stopPath = '/data/crawl-stop.flag';
+    private string $statusPath='/data/crawl-all-status.json';
+    private string $startPath='/data/crawl-start.flag';
+    private string $stopPath='/data/crawl-stop.flag';
 
     public function index()
     {
         return view('sources.index',[
-            'sources'=>GovernmentSource::latest()->paginate(100),
+            'sources'=>GovernmentSource::orderBy('id')->paginate(100),
             'crawlerStatus'=>$this->readStatus(),
         ]);
     }
 
     public function create(){ return view('sources.create'); }
 
-    public function store(Request $request, UrlGuard $guard)
+    public function store(Request $request,UrlGuard $guard)
     {
         $data=$request->validate([
             'name'=>'required|max:255','organization'=>'required|max:255',
@@ -42,49 +43,49 @@ class GovernmentSourceController extends Controller
 
     public function crawlAll()
     {
-        $active = GovernmentSource::query()
-            ->where('status', SourceStatus::Active->value)
-            ->count();
-
-        if ($active === 0) {
-            return back()->with('error','No active sources are available to crawl.');
+        $status=$this->readStatus();
+        if(($status['status']??null)==='running'){
+            return back()->with('status','Crawler is already running.');
         }
 
+        $active=GovernmentSource::query()->where('status',SourceStatus::Active->value)->count();
+        if($active===0) return back()->with('error','No active sources are available to crawl.');
+
         @unlink($this->stopPath);
-
-        $php = escapeshellarg(PHP_BINARY);
-        $script = escapeshellarg(base_path('bin/crawl-all.php'));
-        $log = escapeshellarg(storage_path('logs/crawl-all-launch.log'));
-        exec("nohup {$php} {$script} >> {$log} 2>&1 &");
-
-        return back()->with('status',"Crawler started/resumed for {$active} active sources.");
+        file_put_contents($this->startPath,now()->toIso8601String(),LOCK_EX);
+        return back()->with('status',"Crawler start/resume requested for {$active} active sources.");
     }
 
     public function stopAll()
     {
-        @file_put_contents($this->stopPath, now()->toIso8601String());
-        return back()->with('status','Stop requested. The crawler will finish the current website, then pause before the next website.');
+        $status=$this->readStatus();
+        if(($status['status']??null)!=='running'){
+            return back()->with('status','Crawler is not currently running.');
+        }
+        file_put_contents($this->stopPath,now()->toIso8601String(),LOCK_EX);
+        return back()->with('status','Stop requested. The current website will finish, then the crawler will pause.');
     }
 
     public function crawlStatus(): JsonResponse
     {
-        return response()->json($this->readStatus());
+        return response()->json($this->readStatus(),200,[
+            'Cache-Control'=>'no-store, no-cache, must-revalidate, max-age=0'
+        ]);
     }
 
     public function toggle(GovernmentSource $source)
     {
-        $source->status=$source->status===SourceStatus::Active ? SourceStatus::Paused : SourceStatus::Active;
+        $source->status=$source->status===SourceStatus::Active?SourceStatus::Paused:SourceStatus::Active;
         $source->save();
         return back()->with('status','Source status updated.');
     }
 
     private function readStatus(): array
     {
-        if (!is_file($this->statusPath)) {
-            return ['status'=>'idle','processed'=>0,'total'=>0,'current_source_id'=>null,'sources'=>[]];
+        if(!is_file($this->statusPath)){
+            return ['status'=>'idle','processed'=>0,'total'=>0,'succeeded'=>0,'failed'=>0,'current_source_id'=>null,'sources'=>[]];
         }
-
         $data=json_decode((string)@file_get_contents($this->statusPath),true);
-        return is_array($data) ? $data : ['status'=>'idle','processed'=>0,'total'=>0,'current_source_id'=>null,'sources'=>[]];
+        return is_array($data)?$data:['status'=>'idle','processed'=>0,'total'=>0,'succeeded'=>0,'failed'=>0,'current_source_id'=>null,'sources'=>[]];
     }
 }
