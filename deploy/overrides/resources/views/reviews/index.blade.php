@@ -1,3 +1,87 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LatestGovtJobs Automation</title><style>
-body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:#f4f6f8;color:#111827}nav{background:#111827;padding:14px 24px}nav a{color:#fff;text-decoration:none;margin-right:20px}.wrap{max-width:1180px;margin:28px auto;padding:0 18px}.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:18px;box-shadow:0 2px 8px rgba(0,0,0,.03)}h1,h2,h3{margin-top:0}table{width:100%;border-collapse:collapse}th,td{padding:11px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}input,select,textarea{width:100%;padding:10px;border:1px solid #d1d5db;border-radius:7px;box-sizing:border-box;margin:5px 0 13px}button,.btn{display:inline-block;background:#111827;color:white;border:0;border-radius:7px;padding:9px 13px;text-decoration:none;cursor:pointer}.muted{color:#6b7280}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}.stat{padding:16px;border:1px solid #e5e7eb;border-radius:10px}.stat strong{font-size:28px}.ok{background:#ecfdf5;border-color:#a7f3d0}.err{background:#fef2f2;border-color:#fecaca}.flash{background:#ecfdf5;border:1px solid #a7f3d0;padding:12px;border-radius:8px;margin-bottom:16px}.error{background:#fef2f2;border:1px solid #fecaca;padding:12px;border-radius:8px;margin-bottom:16px}.row{display:grid;grid-template-columns:1fr 1fr;gap:18px}@media(max-width:760px){.row{grid-template-columns:1fr}}
-</style></head><body><nav><a href="<?= e(route('dashboard')) ?>">Dashboard</a><a href="<?= e(route('sources.index')) ?>">Sources</a><a href="<?= e(route('reviews.index')) ?>">Review Queue</a></nav><main class="wrap"><?php if(session('status')): ?><div class="flash"><?= e(session('status')) ?></div><?php endif; ?><?php if(session('error')): ?><div class="error"><?= e(session('error')) ?></div><?php endif; ?><div class="card"><h1>Human Review Queue</h1><table><thead><tr><th>Job</th><th>Organization</th><th>Last date</th><th>Confidence</th></tr></thead><tbody><?php foreach($candidates as $c): ?><tr><td><a href="<?= e(route('reviews.show',$c)) ?>"><?= e($c->job_title) ?></a></td><td><?= e($c->organization) ?></td><td><?= e($c->application_last_date ?: 'Needs review') ?></td><td><strong><?= e($c->confidence_score) ?>%</strong></td></tr><?php endforeach; ?></tbody></table><div style="margin-top:14px"><?= $candidates->links() ?></div></div></main></body></html>
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Found Jobs</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:#f4f6f8;color:#111827}
+nav{background:#111827;padding:14px 24px}
+nav a{color:#fff;text-decoration:none;margin-right:20px}
+.wrap{max-width:1180px;margin:28px auto;padding:0 18px}
+.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,.03)}
+h1{margin:0 0 6px}
+.sub{color:#6b7280;margin:0 0 20px}
+table{width:100%;border-collapse:collapse}
+th,td{padding:12px 10px;border-bottom:1px solid #e5e7eb;text-align:left;vertical-align:top}
+th{font-size:13px;color:#4b5563;background:#f9fafb}
+.job-title{font-weight:700;color:#111827;text-decoration:none}
+.muted{color:#6b7280;font-size:13px}
+.btn{display:inline-block;background:#111827;color:#fff;text-decoration:none;border-radius:7px;padding:8px 12px;font-size:14px}
+.empty{text-align:center;padding:50px 15px;color:#6b7280}
+.flash{background:#ecfdf5;border:1px solid #a7f3d0;padding:12px;border-radius:8px;margin-bottom:16px}
+@media(max-width:760px){table{display:block;overflow-x:auto;white-space:nowrap}}
+</style>
+</head>
+<body>
+<nav>
+<a href="/">Dashboard</a>
+<a href="/sources">Sources</a>
+<a href="/reviews">Found Jobs</a>
+</nav>
+
+<main class="wrap">
+<?php if(session('status')): ?>
+<div class="flash"><?= e(session('status')) ?></div>
+<?php endif; ?>
+
+<div class="card">
+<h1>Found Jobs</h1>
+<p class="sub">Only jobs discovered by the crawler are shown here.</p>
+
+<?php if($candidates->count() === 0): ?>
+<div class="empty">
+<strong>No jobs found yet.</strong><br>
+Run <b>Crawl Now — All Active Sources</b> from the Sources page.
+</div>
+<?php else: ?>
+<table>
+<thead>
+<tr>
+<th>Job Title</th>
+<th>Organization</th>
+<th>Vacancies</th>
+<th>Last Date</th>
+<th>Official Source</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<?php foreach($candidates as $c): ?>
+<tr>
+<td>
+<a class="job-title" href="/reviews/<?= (int)$c->id ?>"><?= e($c->job_title ?: 'Untitled Job') ?></a>
+</td>
+<td><?= e($c->organization ?: '—') ?></td>
+<td><?= e($c->total_vacancies ?: '—') ?></td>
+<td><?= e($c->application_last_date ?: '—') ?></td>
+<td>
+<?php if($c->notification_pdf_url): ?>
+<a target="_blank" rel="noopener" href="<?= e($c->notification_pdf_url) ?>">Notification</a>
+<?php elseif($c->official_source_url): ?>
+<a target="_blank" rel="noopener" href="<?= e($c->official_source_url) ?>">Official page</a>
+<?php else: ?>
+—
+<?php endif; ?>
+</td>
+<td><a class="btn" href="/reviews/<?= (int)$c->id ?>">View Job</a></td>
+</tr>
+<?php endforeach; ?>
+</tbody>
+</table>
+<div style="margin-top:16px"><?= $candidates->links() ?></div>
+<?php endif; ?>
+</div>
+</main>
+</body>
+</html>
