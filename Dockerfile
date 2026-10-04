@@ -16,6 +16,7 @@ RUN cat /tmp/deploy/payload.part1 /tmp/deploy/payload.part2 /tmp/deploy/payload.
     && cp -f /tmp/deploy/overrides/composer.json /app/composer.json \
     && cp -f /tmp/deploy/overrides/routes/web.php /app/routes/web.php \
     && cp -f /tmp/deploy/overrides/bootstrap/app.php /app/bootstrap/app.php \
+    && cp -f /tmp/deploy/overrides/bootstrap/providers.php /app/bootstrap/providers.php \
     && cp -rf /tmp/deploy/overrides/app/* /app/app/ \
     && cp -rf /tmp/deploy/overrides/resources/views/* /app/resources/views/ \
     && COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist \
