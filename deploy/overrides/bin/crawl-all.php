@@ -31,7 +31,6 @@ foreach($sourceIds as $sourceId){
         CrawlGovernmentSource::dispatchSync($sourceId);
 
         JobCandidate::query()
-            ->where('government_source_id',$sourceId)
             ->where('updated_at','>=',$started)
             ->orderBy('id')
             ->each(fn(JobCandidate $candidate) => $enricher->enrich($candidate));
