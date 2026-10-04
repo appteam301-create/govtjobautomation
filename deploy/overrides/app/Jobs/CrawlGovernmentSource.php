@@ -74,8 +74,8 @@ class CrawlGovernmentSource implements ShouldQueue
 
             $listing=(bool)($settings['listing_is_recruitment']??false);
             $max=max(10,min(100,(int)($settings['max_items']??60)));
-            $positive='/\b(recruit(?:ment|ing)?|vacanc(?:y|ies)|applications? invited|walk[ -]?in|apprentice(?:ship)?|engagement|post(?:s)?|hiring|resident|consultant|professor|research (?:associate|fellow|scientist)|project (?:staff|associate|assistant|scientist|technical|officer)|technologist|technical officer|staff nurse|engineer|officer|assistant|clerk|manager|executive|technician|stenographer|trainee|fellowship|tutor|demonstrator)\b/u';
-            $bad='/\b(final result|provisional result|document verification|admit card|answer key|merit list|shortlist|shortlisted|eligibility list|tender|procurement|auction|objection|cut[ -]?off|interview schedule|exam schedule|expression of interest)\b/u';
+            $positive='/\\b(recruit(?:ment|ing)?|vacanc(?:y|ies)|applications? invited|walk[ -]?in|apprentice(?:ship)?|engagement|post(?:s)?\\s+of|hiring|agniveer|constable|sub[ -]?inspector|inspector|resident|consultant|director|registrar|librarian|accountant|professor|scientist|research (?:associate|fellow|scientist)|project (?:staff|associate|assistant|scientist|technical|officer)|technologist|technical officer|staff nurse|engineer|officer|assistant|clerk|manager|executive|technician|stenographer|trainee|fellowship|tutor|demonstrator|driver|attendant|tradesman|multi[ -]?tasking staff|mts|data entry operator|deo)\\b/u';
+            $bad='/\\b(final result|provisional result|document verification|admit card|answer key|merit list|shortlist|shortlisted|eligibility list|tender|procurement|auction|objection|cut[ -]?off|interview schedule|exam schedule|expression of interest|closed|archived|cancelled|cancellation)\\b/u';
 
             $scored=[];
             foreach($items as $item){
