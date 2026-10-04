@@ -82,7 +82,13 @@ class CrawlGovernmentSource implements ShouldQueue
                 $title=mb_strtolower(trim((string)($item['title']??'')));
                 if($title==='' || mb_strlen($title)<8 || mb_strlen($title)>420) continue;
                 if(preg_match($bad,$title)) continue;
-                if(preg_match('/^(extension of last date|corrigendum|addendum|amendment|revised notice|notice regarding|important notice)\b/u',$title)) continue;
+                if(preg_match('/^(extension of last date|corrigendum|addendum|amendment|revised notice|notice regarding|important notice|expression of interest|know your|home ?notices?|home organisation)\\b/u',$title)) continue;
+                if(preg_match('/^(central public info(?:rmation)? officer|tentative vacancy|deputy director of public instruction)$/u',$title)) continue;
+                $navHits=0;
+                foreach(['about','contact','rti','faq','photos','videos','publications','forms','manuals','press release','resources','conference','home'] as $nav){
+                    if(str_contains($title,$nav)) $navHits++;
+                }
+                if($navHits>=4) continue;
 
                 $generic=['vacancy','vacancies','all vacancies','recruitment','recruitments','jobs','career','careers','application form','apply online','faculty','project','english','hindi','know more about vacancies','vision document','रिक्तियां','भर्ती','देखें'];
                 if(in_array($title,$generic,true)) continue;
