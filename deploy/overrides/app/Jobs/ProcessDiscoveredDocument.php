@@ -24,22 +24,22 @@ class ProcessDiscoveredDocument implements ShouldQueue
         $source=GovernmentSource::find($doc->government_source_id);
         if(!$source) return;
 
-        $title=trim((string)$doc->title);
+        $title=trim(preg_replace('/\s+/u',' ',(string)$doc->title));
         $url=(string)$doc->url;
-        $hay=mb_strtolower($title.' '.$url);
 
-        if(preg_match('/\b(final result|provisional result|admit card|hall ticket|answer key|merit list|shortlist|shortlisted|interview schedule|exam schedule|examination schedule|objection|response sheet|cut[ -]?off|appointment order|tender|procurement|auction)\b/u',$hay)) return;
-
-        $jobWords=['recruit','vacan','career','job','advert','advt','apply','apprent','faculty','non-faculty','project','fellow','resident','consultant','trainee','position','officer','assistant','engineer','technician','clerk','manager','executive','medical officer','staff nurse','professor'];
-        $looksLikeJob=false;
-        foreach($jobWords as $word){ if(str_contains($hay,$word)){ $looksLikeJob=true; break; } }
-        if(!$looksLikeJob && ($doc->document_type??'')!=='pdf') return;
+        if(!$this->looksLikeRealJob($title)) return;
 
         $raw=$this->extractText($url,(string)($doc->document_type??'html'),$title);
         if($raw==='') $raw=$title;
         $raw=mb_substr($raw,0,120000);
 
+        // Result/DV/answer-key/update pages must never become new job rows.
+        $head=mb_strtolower(mb_substr($title.' '.$raw,0,2500));
+        if(preg_match('/\b(final result|provisional result|document verification|admit card|hall ticket|answer key|merit list|shortlist|shortlisted|eligibility list|interview schedule|exam schedule|examination schedule|objection|response sheet|cut[ -]?off|appointment order)\b/u',$head)) return;
+
         $jobTitle=$this->cleanTitle($title);
+        if(!$this->looksLikeRealJob($jobTitle)) return;
+
         $vacancies=$this->intMatch($raw,'/(?:total\s+(?:number\s+of\s+)?vacanc(?:y|ies)|no\.?\s*of\s*posts?|vacanc(?:y|ies))[\s:\-]*(\d{1,6})/i');
         $lastDate=$this->dateNear($raw,['last date','closing date','application end date','last date for application']);
         $applyUrl=$this->urlNear($raw,['apply online','apply here','application link']);
@@ -49,7 +49,7 @@ class ProcessDiscoveredDocument implements ShouldQueue
         $payload=[
             'government_source_id'=>$source->id,
             'discovered_document_id'=>$doc->id,
-            'job_title'=>$jobTitle ?: $title ?: 'Recruitment Notification',
+            'job_title'=>$jobTitle ?: 'Recruitment Notification',
             'organization'=>$source->organization,
             'total_vacancies'=>$vacancies,
             'application_last_date'=>$lastDate,
@@ -60,12 +60,12 @@ class ProcessDiscoveredDocument implements ShouldQueue
             'status'=>'needs_review',
             'extracted_data'=>[
                 'raw_text'=>$raw,
-                'job_title'=>$jobTitle ?: $title,
+                'job_title'=>$jobTitle,
                 'organization'=>$source->organization,
                 'total_vacancies'=>$vacancies,
                 'application_end_date'=>$lastDate,
                 'apply_url'=>$applyUrl,
-                'official_notification_url'=>($doc->document_type??'')==='pdf'?$url:$url,
+                'official_notification_url'=>$url,
                 'source_name'=>$source->name,
                 'source_url'=>$source->recruitment_url,
             ],
@@ -88,6 +88,26 @@ class ProcessDiscoveredDocument implements ShouldQueue
         $enricher->enrich($candidate);
     }
 
+    private function looksLikeRealJob(string $title): bool
+    {
+        $t=trim(mb_strtolower(preg_replace('/\s+/u',' ',$title)));
+        if($t==='' || mb_strlen($t)<8 || mb_strlen($t)>420) return false;
+
+        $generic=[
+            'vacancy','vacancies','all vacancies','recruitment','recruitments','jobs','career','careers',
+            'application form','apply online','eligibility list','faculty','project','english','hindi',
+            'know more about vacancies','vision document','notice','notification','advertisement',
+            'रिक्तियां','भर्ती','देखें'
+        ];
+        if(in_array($t,$generic,true)) return false;
+
+        if(preg_match('/^(extension of last date|corrigendum|addendum|amendment|revised notice|notice regarding|important notice|expression of interest)\b/u',$t)) return false;
+        if(preg_match('/\b(final result|provisional result|document verification|admit card|hall ticket|answer key|merit list|shortlist|shortlisted|eligibility list|interview schedule|exam schedule|examination schedule|objection|response sheet|cut[ -]?off|appointment order|tender|procurement|auction)\b/u',$t)) return false;
+
+        $positive='/\b(recruit(?:ment|ing)?|vacanc(?:y|ies)|applications? invited|walk[ -]?in|apprentice(?:ship)?|engagement of|post(?:s)? of|hiring|senior resident|junior resident|medical consultant|bank.?s medical consultant|assistant professor|associate professor|professor|research (?:associate|fellow|scientist)|project (?:staff|associate|assistant|scientist|technical|officer)|technologist|technical officer|staff nurse|engineer|officer|assistant|clerk|manager|executive|technician|stenographer|trainee|fellowship|tutor|demonstrator)\b/u';
+        return (bool)preg_match($positive,$t);
+    }
+
     private function extractText(string $url,string $type,string $fallback): string
     {
         try{
@@ -95,7 +115,7 @@ class ProcessDiscoveredDocument implements ShouldQueue
                 'User-Agent'=>config('govjobs.crawler.user_agent'),
                 'Accept'=>'text/html,application/pdf,*/*;q=0.8',
                 'Accept-Language'=>'en-IN,en;q=0.9'
-            ])->timeout(20)->retry(1,300,throw:false)->get($url);
+            ])->timeout(18)->retry(1,300,throw:false)->get($url);
             if(!$response->successful()) return $fallback;
 
             $contentType=strtolower((string)$response->header('Content-Type'));
@@ -103,8 +123,7 @@ class ProcessDiscoveredDocument implements ShouldQueue
                 $tmp=tempnam(sys_get_temp_dir(),'govjob_');
                 file_put_contents($tmp,$response->body());
                 $out=$tmp.'.txt';
-                $cmd='timeout 30s pdftotext -layout '.escapeshellarg($tmp).' '.escapeshellarg($out).' 2>/dev/null';
-                shell_exec($cmd);
+                shell_exec('timeout 25s pdftotext -layout '.escapeshellarg($tmp).' '.escapeshellarg($out).' 2>/dev/null');
                 $text=is_file($out)?(string)file_get_contents($out):'';
                 @unlink($tmp); @unlink($out);
                 return trim($text)?:$fallback;
@@ -153,11 +172,11 @@ class ProcessDiscoveredDocument implements ShouldQueue
 
     private function confidence(string $title,string $raw,?int $vacancies,?string $lastDate): int
     {
-        $score=30;
+        $score=35;
         if($title!=='') $score+=20;
         if(mb_strlen($raw)>400) $score+=15;
         if($vacancies!==null) $score+=10;
-        if($lastDate!==null) $score+=15;
+        if($lastDate!==null) $score+=10;
         if(preg_match('/qualification|eligibility|pay scale|salary|selection process/i',$raw)) $score+=10;
         return min(100,$score);
     }
