@@ -20,6 +20,7 @@ class ProcessDiscoveredDocument implements ShouldQueue
 
     public function handle(JobDetailsEnricher $enricher): void
     {
+        if(is_file('/data/crawl-reset.flag')) return;
         $doc=DiscoveredDocument::findOrFail($this->documentId);
         $source=GovernmentSource::find($doc->government_source_id);
         if(!$source) return;
@@ -100,6 +101,8 @@ class ProcessDiscoveredDocument implements ShouldQueue
         if(!$existing && in_array('discovered_document_id',$columns,true)){
             $existing=JobCandidate::query()->where('discovered_document_id',$doc->id)->first();
         }
+
+        if(is_file('/data/crawl-reset.flag')) return;
 
         $candidate=$existing?:new JobCandidate();
         $candidate->forceFill($payload);
