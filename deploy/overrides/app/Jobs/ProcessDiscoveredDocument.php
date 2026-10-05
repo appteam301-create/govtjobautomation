@@ -41,6 +41,17 @@ class ProcessDiscoveredDocument implements ShouldQueue
 
         if ($this->isClearlyNotVacancy($seedText)) return;
 
+        // Fast expiry check from the recruitment-list row before downloading a detail page/PDF.
+        $seedDeadline = $this->findLastDate($seedText, $context, $listingTrusted);
+        if ($seedDeadline && !$this->isFutureLastDate($seedDeadline)) {
+            $this->deleteExistingCandidate((string)$doc->url, (int)$doc->id);
+            return;
+        }
+        if ($listingTrusted && !$seedDeadline && $this->listingContextIsClearlyExpired($context)) {
+            $this->deleteExistingCandidate((string)$doc->url, (int)$doc->id);
+            return;
+        }
+
         $raw = $this->extractText((string)$doc->url, (string)($doc->document_type ?? 'html'), $seedText);
         $raw = trim($seedText . "\n" . $raw);
         $raw = mb_substr($raw, 0, 160000);
@@ -50,7 +61,7 @@ class ProcessDiscoveredDocument implements ShouldQueue
         $jobTitle = $this->deriveJobTitle($title, $context);
         if (!$listingTrusted && !$this->looksLikeVacancy($jobTitle . ' ' . mb_substr($raw, 0, 1200))) return;
 
-        $lastDate = $this->findLastDate($raw, $context, $listingTrusted);
+        $lastDate = $this->findLastDate($raw, $context, $listingTrusted) ?: $seedDeadline;
         if (!$this->isFutureLastDate($lastDate)) {
             $this->deleteExistingCandidate((string)$doc->url, (int)$doc->id);
             return;
@@ -204,7 +215,7 @@ class ProcessDiscoveredDocument implements ShouldQueue
             'closing date of online application','closing date for online application',
             'closing date of application','closing date for application','online registration closes',
             'application end date','last date to apply','last date for application',
-            'last date of application','last date','closing date','apply by',
+            'last date of application','last date','end date','closing date','closing on','apply by',
             'applications close','application closes','upto','up to',
         ];
 
@@ -231,6 +242,20 @@ class ProcessDiscoveredDocument implements ShouldQueue
         }
 
         return null;
+    }
+
+    private function listingContextIsClearlyExpired(string $context): bool
+    {
+        if (trim($context) === '') return false;
+
+        $dates = $this->extractAllDates($context);
+        if (count($dates) < 2) return false;
+
+        foreach ($dates as $date) {
+            if ($this->isFutureLastDate($date)) return false;
+        }
+
+        return true;
     }
 
     private function datePattern(): string
