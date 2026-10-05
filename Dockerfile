@@ -1,7 +1,7 @@
 FROM php:8.4-cli-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git unzip curl poppler-utils tesseract-ocr chromium libzip-dev libicu-dev libonig-dev libsqlite3-dev libxml2-dev \
+    git unzip curl ca-certificates poppler-utils tesseract-ocr chromium libzip-dev libicu-dev libonig-dev libsqlite3-dev libxml2-dev \
     && docker-php-ext-install pdo_mysql pdo_sqlite mbstring intl zip dom \
     && rm -rf /var/lib/apt/lists/*
 
