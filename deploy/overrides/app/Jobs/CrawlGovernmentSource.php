@@ -29,6 +29,7 @@ class CrawlGovernmentSource implements ShouldQueue
         ChangeDetector $changes,
         BrowserRenderer $browser
     ): void {
+        if(is_file('/data/crawl-reset.flag')) return;
         $source=GovernmentSource::findOrFail($this->sourceId);
         $run=CrawlRun::create(['government_source_id'=>$source->id,'started_at'=>now(),'status'=>'running']);
 
@@ -105,6 +106,7 @@ class CrawlGovernmentSource implements ShouldQueue
 
             $new=0;
             foreach($items as $item){
+                if(is_file('/data/crawl-reset.flag')) return;
                 $normalized=$norm->url($item['url']);
                 $fingerprint=$norm->hash($normalized.'|'.mb_strtolower($item['title']??''));
                 if(!$changes->isNew($source,$fingerprint,$item)) continue;
