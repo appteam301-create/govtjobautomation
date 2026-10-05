@@ -41,8 +41,28 @@ class ProcessDiscoveredDocument implements ShouldQueue
         if(!$this->looksLikeRealJob($jobTitle)) return;
 
         $vacancies=$this->intMatch($raw,'/(?:total\s+(?:number\s+of\s+)?vacanc(?:y|ies)|no\.?\s*of\s*posts?|vacanc(?:y|ies))[\s:\-]*(\d{1,6})/i');
-        $lastDate=$this->dateNear($raw,['last date','closing date','application end date','last date for application']);
+        $lastDate=$this->dateNear($raw,[
+            'last date',
+            'closing date',
+            'application end date',
+            'last date for application',
+            'last date of application',
+            'last date to apply',
+            'last date for submission',
+            'last date of submission',
+            'closing date for application',
+            'closing date of application',
+            'last date for receipt of application',
+            'last date for receipt of applications',
+            'closing date of online application'
+        ]);
         $applyUrl=$this->urlNear($raw,['apply online','apply here','application link']);
+
+        // Hard rule: only save a job when its deadline is known and strictly after today.
+        if(!$this->isFutureLastDate($lastDate)){
+            $this->deleteExistingCandidate($url,$doc->id);
+            return;
+        }
 
         $model=new JobCandidate();
         $columns=Schema::getColumnListing($model->getTable());
@@ -158,13 +178,74 @@ class ProcessDiscoveredDocument implements ShouldQueue
 
     private function dateNear(string $raw,array $labels): ?string
     {
+        $datePattern='(\\d{4}[\\/\\-.]\\d{1,2}[\\/\\-.]\\d{1,2}|\\d{1,2}[\\/\\-.]\\d{1,2}[\\/\\-.]\\d{2,4}|\\d{1,2}(?:st|nd|rd|th)?\\s+[A-Za-z]{3,9}\\s+\\d{4}|[A-Za-z]{3,9}\\s+\\d{1,2}(?:st|nd|rd|th)?,?\\s+\\d{4})';
+
         foreach($labels as $label){
-            $p='/'.preg_quote($label,'/').'[^\n\d]{0,50}(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}|[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})/i';
+            $p='/'.preg_quote($label,'/').'[^\\n\\d]{0,80}'.$datePattern.'/i';
             if(preg_match($p,$raw,$m)){
-                try{return \Carbon\Carbon::parse($m[1])->format('Y-m-d');}catch(\Throwable $e){}
+                $parsed=$this->parseGovDate($m[1]);
+                if($parsed) return $parsed;
             }
         }
+
         return null;
+    }
+
+    private function parseGovDate(string $value): ?string
+    {
+        $tz=config('app.timezone','Asia/Kolkata');
+        $value=trim(preg_replace('/(\\d{1,2})(st|nd|rd|th)\\b/i','$1',$value));
+
+        $formats=[
+            'd/m/Y','d-m-Y','d.m.Y',
+            'd/m/y','d-m-y','d.m.y',
+            'Y/m/d','Y-m-d','Y.m.d',
+            'd F Y','d M Y',
+            'F d Y','M d Y',
+            'F d, Y','M d, Y'
+        ];
+
+        foreach($formats as $format){
+            try{
+                $date=\\Carbon\\Carbon::createFromFormat($format,$value,$tz);
+                if($date !== false) return $date->format('Y-m-d');
+            }catch(\\Throwable $e){}
+        }
+
+        try{
+            return \\Carbon\\Carbon::parse($value,$tz)->format('Y-m-d');
+        }catch(\\Throwable $e){
+            return null;
+        }
+    }
+
+    private function isFutureLastDate(?string $date): bool
+    {
+        if(!$date) return false;
+
+        $tz=config('app.timezone','Asia/Kolkata');
+
+        try{
+            $deadline=\\Carbon\\Carbon::createFromFormat('Y-m-d',$date,$tz)->startOfDay();
+            return $deadline->gt(\\Carbon\\Carbon::today($tz));
+        }catch(\\Throwable $e){
+            return false;
+        }
+    }
+
+    private function deleteExistingCandidate(string $url,int $documentId): void
+    {
+        $model=new JobCandidate();
+        $columns=Schema::getColumnListing($model->getTable());
+
+        if(in_array('official_source_url',$columns,true)){
+            JobCandidate::query()->where('official_source_url',$url)->delete();
+            return;
+        }
+
+        if(in_array('discovered_document_id',$columns,true)){
+            JobCandidate::query()->where('discovered_document_id',$documentId)->delete();
+        }
     }
 
     private function urlNear(string $raw,array $labels): ?string
