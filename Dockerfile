@@ -19,8 +19,9 @@ RUN cat /tmp/deploy/payload.part1 /tmp/deploy/payload.part2 /tmp/deploy/payload.
     && cp -f /tmp/deploy/overrides/bootstrap/providers.php /app/bootstrap/providers.php \
     && cp -rf /tmp/deploy/overrides/app/* /app/app/ \
     && cp -rf /tmp/deploy/overrides/resources/views/* /app/resources/views/ \
-    && mkdir -p /app/bin \
+    && mkdir -p /app/bin /app/data \
     && cp -rf /tmp/deploy/overrides/bin/* /app/bin/ \
+    && cp -rf /tmp/deploy/overrides/data/* /app/data/ \
     && COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist \
     && mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \
     && chmod -R 775 storage bootstrap/cache
@@ -33,4 +34,4 @@ ENV CRAWLER_USER_AGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrom
 
 EXPOSE 8080
 
-CMD sh -c 'if [ "${DB_CONNECTION:-sqlite}" = "sqlite" ]; then mkdir -p "$(dirname "${DB_DATABASE:-/data/database.sqlite}")" && touch "${DB_DATABASE:-/data/database.sqlite}"; fi; php artisan migrate --force && php /app/bin/bootstrap-production.php && php artisan optimize:clear && php /app/bin/crawler-daemon.php >> /app/storage/logs/crawler-daemon.log 2>&1 & exec php artisan serve --host=0.0.0.0 --port=${PORT:-8080}'
+CMD sh -c 'if [ "${DB_CONNECTION:-sqlite}" = "sqlite" ]; then mkdir -p "$(dirname "${DB_DATABASE:-/data/database.sqlite}")" && touch "${DB_DATABASE:-/data/database.sqlite}"; fi; php artisan migrate --force && php /app/bin/bootstrap-production.php && php /app/bin/import-recruitment-directory.php && php artisan optimize:clear && php /app/bin/crawler-daemon.php >> /app/storage/logs/crawler-daemon.log 2>&1 & exec php artisan serve --host=0.0.0.0 --port=${PORT:-8080}'
