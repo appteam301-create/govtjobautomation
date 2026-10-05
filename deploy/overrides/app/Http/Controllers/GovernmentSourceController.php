@@ -7,6 +7,8 @@ use App\Models\GovernmentSource;
 use App\Services\Security\UrlGuard;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class GovernmentSourceController extends Controller
 {
@@ -52,6 +54,7 @@ class GovernmentSourceController extends Controller
         if($active===0) return back()->with('error','No active sources are available to crawl.');
 
         @unlink($this->stopPath);
+        @unlink('/data/crawl-reset.flag');
         file_put_contents($this->startPath,now()->toIso8601String(),LOCK_EX);
         return back()->with('status',"Crawler start/resume requested for {$active} active sources.");
     }
@@ -71,6 +74,54 @@ class GovernmentSourceController extends Controller
         return response()->json($this->readStatus(),200,[
             'Cache-Control'=>'no-store, no-cache, must-revalidate, max-age=0'
         ]);
+    }
+
+    public function clearAllData()
+    {
+        // Prevent any in-flight crawler from repopulating data during a reset.
+        @file_put_contents($this->stopPath,now()->toIso8601String(),LOCK_EX);
+        @unlink($this->startPath);
+        @file_put_contents('/data/crawl-reset.flag',now()->toIso8601String(),LOCK_EX);
+
+        $tables=[
+            'job_evidence','job_evidences','review_actions','publish_attempts',
+            'job_candidates','discovered_documents','crawl_runs',
+            'crawler_health','crawler_healths','source_rules','government_sources',
+            'jobs','job_batches','failed_jobs'
+        ];
+
+        $driver=DB::getDriverName();
+
+        try{
+            if($driver==='sqlite') DB::statement('PRAGMA foreign_keys = OFF');
+            else Schema::disableForeignKeyConstraints();
+
+            foreach($tables as $table){
+                if(Schema::hasTable($table)) DB::table($table)->delete();
+            }
+
+            if($driver==='sqlite' && Schema::hasTable('sqlite_sequence')){
+                $names=array_values(array_filter($tables,fn($t)=>Schema::hasTable($t)));
+                if($names){
+                    DB::table('sqlite_sequence')->whereIn('name',$names)->delete();
+                }
+            }
+        }finally{
+            if($driver==='sqlite') DB::statement('PRAGMA foreign_keys = ON');
+            else Schema::enableForeignKeyConstraints();
+        }
+
+        foreach([
+            $this->statusPath,
+            $this->startPath,
+            $this->stopPath,
+            '/data/crawl-all.lock'
+        ] as $path){
+            @unlink($path);
+        }
+
+        // Keep the reset flag until the next intentional crawl start.
+        return redirect('/sources')->with('status','All data cleared. Sources, found jobs, crawler history and review data are now empty.');
     }
 
     public function toggle(GovernmentSource $source)
