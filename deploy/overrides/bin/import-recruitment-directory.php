@@ -11,7 +11,7 @@ require __DIR__.'/../vendor/autoload.php';
 $app=require __DIR__.'/../bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
 
-$marker='/data/recruitment-directory-20261005-222.done';
+$marker='/data/recruitment-directory-20261005-222-v2.done';
 if(is_file($marker)){
     echo "Recruitment directory already imported.\n";
     exit(0);
@@ -87,11 +87,21 @@ DB::transaction(function() use($rows,$include,$ignore,&$created,&$updated){
             default=>'State',
         };
 
-        $mode=in_array($row['page_type'],['Recruitment portal','Mixed notice board','Exam notifications'],true)
-            ? 'AUTO'
-            : 'HTML';
+        $urlLower=strtolower($row['url']);
+        $isPortal=in_array($row['page_type'],['Recruitment portal','Mixed notice board','Exam notifications'],true)
+            || str_contains($urlLower,'.aspx')
+            || str_contains($urlLower,'servlet')
+            || str_contains($urlLower,'pariksha')
+            || str_contains($urlLower,'default.aspx');
 
+        $mode=$isPortal ? 'AUTO' : 'HTML';
         $listingIsRecruitment=$row['page_type']!=='Mixed notice board';
+
+        $profile='generic';
+        if(preg_match('#/(notice_category|document-category)/(recruitment|recruitments)#i',$row['url'])) $profile='nic-recruitment';
+        elseif($isPortal) $profile='portal';
+        elseif($row['page_type']==='Advertisements') $profile='advertisements';
+        elseif($row['page_type']==='Exam notifications') $profile='exam-notifications';
 
         $source=GovernmentSource::query()->where('recruitment_url',$row['url'])->first();
         $wasNew=!$source;
@@ -114,8 +124,9 @@ DB::transaction(function() use($rows,$include,$ignore,&$created,&$updated){
                 'directory_id'=>$row['directory_id'],
                 'page_type'=>$row['page_type'],
                 'listing_is_recruitment'=>$listingIsRecruitment,
+                'source_profile'=>$profile,
                 'force_browser'=>false,
-                'max_items'=>80,
+                'max_items'=>120,
                 'verified'=>true,
                 'verified_at'=>'2026-10-05',
                 'imported_from'=>'India_Government_Recruitment_Pages.xlsx',
