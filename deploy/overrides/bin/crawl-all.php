@@ -2,12 +2,25 @@
 use App\Enums\SourceStatus;
 use App\Jobs\CrawlGovernmentSource;
 use App\Models\GovernmentSource;
+use App\Models\JobCandidate;
 use Illuminate\Contracts\Console\Kernel;
 
 define('LARAVEL_START', microtime(true));
 require __DIR__.'/../vendor/autoload.php';
 $app=require __DIR__.'/../bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
+
+try{
+    $today=\Carbon\Carbon::today(config('app.timezone','Asia/Kolkata'))->toDateString();
+    JobCandidate::query()
+        ->where(function($q) use($today){
+            $q->whereNull('application_last_date')
+              ->orWhereDate('application_last_date','<=',$today);
+        })
+        ->delete();
+}catch(\Throwable $e){
+    report($e);
+}
 
 $lockPath='/data/crawl-all.lock';
 $statusPath='/data/crawl-all-status.json';
