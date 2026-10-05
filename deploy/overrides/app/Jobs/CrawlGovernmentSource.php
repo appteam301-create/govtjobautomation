@@ -11,6 +11,7 @@ use App\Services\Crawling\ChangeDetector;
 use App\Services\Crawling\ContentNormalizer;
 use App\Services\Crawling\HtmlDiscovery;
 use App\Services\Crawling\HttpFetcher;
+use Carbon\Carbon;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Throwable;
@@ -188,11 +189,15 @@ class CrawlGovernmentSource implements ShouldQueue
             if ($title === '' || mb_strlen($title) < 5 || mb_strlen($title) > 600) continue;
             if (preg_match($bad, $hay)) continue;
 
+            $dateState = $listing ? $this->listingDateState($context . ' ' . $title) : 0;
+            if ($dateState < 0) continue;
+
             $score = 0;
             if (preg_match($positive, $hay)) $score += 5;
             if (($item['type'] ?? '') === 'pdf') $score += 3;
             if (!empty($item['synthetic'])) $score += 2;
             if ($this->containsDate($context . ' ' . $title)) $score += 3;
+            if ($dateState > 0) $score += 5;
 
             $path = strtolower((string)(parse_url((string)($item['url'] ?? ''), PHP_URL_PATH) ?? ''));
             if (preg_match('/(recruit|vacan|career|advert|notice|notification|job|employment)/', $path)) $score += 2;
@@ -205,10 +210,66 @@ class CrawlGovernmentSource implements ShouldQueue
 
         usort($scored, fn(array $a, array $b) => ($b['_score'] ?? 0) <=> ($a['_score'] ?? 0));
 
+        $deduped = [];
+        foreach ($scored as $item) {
+            $key = strtolower(rtrim((string)($item['url'] ?? ''), '/'));
+            if (!isset($deduped[$key]) || ($item['_score'] ?? 0) > ($deduped[$key]['_score'] ?? 0)) {
+                $deduped[$key] = $item;
+            }
+        }
+
         return array_values(array_map(function (array $item) {
             unset($item['_score']);
             return $item;
-        }, $scored));
+        }, array_values($deduped)));
+    }
+
+    private function listingDateState(string $text): int
+    {
+        $dates = $this->extractDates($text);
+        if (!$dates) return 0;
+
+        $explicitDeadline = (bool)preg_match('/\\b(last date|end date|closing date|closing on|apply by|application closes?|applications close|upto|up to)\\b/i', $text);
+        $today = Carbon::today(config('app.timezone', 'Asia/Kolkata'))->format('Y-m-d');
+        $future = array_values(array_filter($dates, fn(string $d) => $d > $today));
+
+        if ($future) return 1;
+        if ($explicitDeadline || count($dates) >= 2) return -1;
+        return 0;
+    }
+
+    private function extractDates(string $text): array
+    {
+        $pattern = '(\\d{4}[\\/\\-.]\\d{1,2}[\\/\\-.]\\d{1,2}|\\d{1,2}[\\/\\-.]\\d{1,2}[\\/\\-.]\\d{2,4}|\\d{1,2}(?:st|nd|rd|th)?\\s+[A-Za-z]{3,9}\\s+\\d{2,4}|[A-Za-z]{3,9}\\s+\\d{1,2}(?:st|nd|rd|th)?,?\\s+\\d{2,4})';
+        $out = [];
+
+        if (preg_match_all('/' . $pattern . '/iu', $text, $matches)) {
+            foreach ($matches[1] as $value) {
+                $date = $this->parseDate($value);
+                if ($date) $out[$date] = true;
+            }
+        }
+
+        return array_keys($out);
+    }
+
+    private function parseDate(string $value): ?string
+    {
+        $tz = config('app.timezone', 'Asia/Kolkata');
+        $value = trim((string)preg_replace('/(\\d{1,2})(st|nd|rd|th)\\b/i', '$1', $value));
+
+        foreach (['d/m/Y','d-m-Y','d.m.Y','d/m/y','d-m-y','d.m.y','Y/m/d','Y-m-d','Y.m.d','d F Y','d M Y','F d Y','M d Y','F d, Y','M d, Y'] as $format) {
+            try {
+                $date = Carbon::createFromFormat($format, $value, $tz);
+                if ($date !== false) return $date->format('Y-m-d');
+            } catch (\\Throwable $e) {}
+        }
+
+        try {
+            return Carbon::parse($value, $tz)->format('Y-m-d');
+        } catch (\\Throwable $e) {
+            return null;
+        }
     }
 
     private function containsDate(string $text): bool
