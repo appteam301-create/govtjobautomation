@@ -23,6 +23,7 @@ RUN cat /tmp/deploy/payload.part1 /tmp/deploy/payload.part2 /tmp/deploy/payload.
     && cp -rf /tmp/deploy/overrides/bin/* /app/bin/ \
     && cp -rf /tmp/deploy/overrides/data/* /app/data/ \
     && COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist \
+    && find /app/app /app/routes /app/config /app/bin -type f -name '*.php' -print0 | xargs -0 -n1 php -l \
     && mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \
     && chmod -R 775 storage bootstrap/cache
 
