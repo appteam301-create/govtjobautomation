@@ -52,9 +52,18 @@ class ProcessDiscoveredDocument implements ShouldQueue
             return;
         }
 
-        $raw = $this->extractText((string)$doc->url, (string)($doc->document_type ?? 'html'), $seedText);
-        $raw = trim($seedText . "\n" . $raw);
-        $raw = mb_substr($raw, 0, 160000);
+        $synthetic = (bool)($metadata['synthetic'] ?? false);
+        $raw = $seedText;
+
+        // If the trusted recruitment listing already gives a future deadline, do not
+        // re-download every detail page/PDF. Save from the listing row and leave
+        // unavailable fields pending. Deep-fetch only when a deadline still has to be found.
+        if (!$seedDeadline && !$synthetic) {
+            $detailText = $this->extractText((string)$doc->url, (string)($doc->document_type ?? 'html'), '');
+            if ($detailText !== '') $raw = trim($seedText . "\n" . $detailText);
+        }
+
+        $raw = mb_substr($raw, 0, 120000);
 
         if ($this->isClearlyNotVacancy(mb_substr($raw, 0, 5000))) return;
 
@@ -127,7 +136,7 @@ class ProcessDiscoveredDocument implements ShouldQueue
                 'User-Agent' => config('govjobs.crawler.user_agent'),
                 'Accept' => 'text/html,application/pdf,*/*;q=0.8',
                 'Accept-Language' => 'en-IN,en;q=0.9',
-            ])->timeout(20)->retry(1, 300, throw: false)->get($fetchUrl);
+            ])->timeout(8)->get($fetchUrl);
 
             if (!$response->successful()) return $fallback;
 
@@ -151,19 +160,19 @@ class ProcessDiscoveredDocument implements ShouldQueue
         file_put_contents($tmp, $bytes);
         $txt = $tmp . '.txt';
 
-        shell_exec('timeout 30s pdftotext -layout ' . escapeshellarg($tmp) . ' ' . escapeshellarg($txt) . ' 2>/dev/null');
+        shell_exec('timeout 10s pdftotext -layout ' . escapeshellarg($tmp) . ' ' . escapeshellarg($txt) . ' 2>/dev/null');
         $text = is_file($txt) ? trim((string)file_get_contents($txt)) : '';
 
         if (mb_strlen($text) < 120) {
             $dir = $tmp . '_ocr';
             @mkdir($dir);
             $prefix = $dir . '/page';
-            shell_exec('timeout 35s pdftoppm -f 1 -l 4 -jpeg -r 160 ' . escapeshellarg($tmp) . ' ' . escapeshellarg($prefix) . ' >/dev/null 2>&1');
+            shell_exec('timeout 12s pdftoppm -f 1 -l 2 -jpeg -r 140 ' . escapeshellarg($tmp) . ' ' . escapeshellarg($prefix) . ' >/dev/null 2>&1');
 
             $ocrParts = [];
             foreach (glob($prefix . '-*.jpg') ?: [] as $image) {
                 $outBase = $image . '_ocr';
-                shell_exec('timeout 20s tesseract ' . escapeshellarg($image) . ' ' . escapeshellarg($outBase) . ' -l eng 2>/dev/null');
+                shell_exec('timeout 8s tesseract ' . escapeshellarg($image) . ' ' . escapeshellarg($outBase) . ' -l eng 2>/dev/null');
                 $ocrFile = $outBase . '.txt';
                 if (is_file($ocrFile)) {
                     $ocrParts[] = (string)file_get_contents($ocrFile);
