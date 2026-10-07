@@ -31,7 +31,7 @@ ENV APP_ENV=production
 ENV APP_DEBUG=false
 ENV LOG_CHANNEL=stderr
 ENV CHROME_BINARY=/usr/bin/chromium
-ENV CRAWLER_USER_AGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/140 Safari/537.36 LatestGovtJobsCrawler/1.0"
+ENV CRAWLER_USER_AGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 
 EXPOSE 8080
 
