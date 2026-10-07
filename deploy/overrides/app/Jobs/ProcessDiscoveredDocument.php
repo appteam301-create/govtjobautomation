@@ -334,7 +334,11 @@ class ProcessDiscoveredDocument implements ShouldQueue
         $tz = config('app.timezone', 'Asia/Kolkata');
 
         try {
-            return Carbon::createFromFormat('Y-m-d', $date, $tz)->startOfDay()->gt(Carbon::today($tz));
+            $deadline = Carbon::createFromFormat('Y-m-d', $date, $tz)->startOfDay();
+            $today = Carbon::today($tz);
+            $latestReasonable = $today->copy()->addMonthsNoOverflow(18);
+
+            return $deadline->gt($today) && $deadline->lte($latestReasonable);
         } catch (Throwable $e) {
             return false;
         }
