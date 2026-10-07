@@ -119,10 +119,22 @@ class JobMissingDataFetcher
 
     private function missingFields(array $data): array
     {
+        $references = is_array($data['field_sources'] ?? null) ? $data['field_sources'] : [];
+
         return array_values(array_filter(
             JobDetailsEnricher::FIELDS,
-            fn($field) => !in_array($field, self::SKIP_FIELDS, true) && $this->isMissing($data[$field] ?? null)
+            fn($field) =>
+                !in_array($field, self::SKIP_FIELDS, true)
+                && $this->isMissing($data[$field] ?? null)
+                && !$this->hasSuccessfulSource($references[$field] ?? null)
         ));
+    }
+
+    private function hasSuccessfulSource(mixed $source): bool
+    {
+        if (!is_array($source)) return false;
+        $url = trim((string)($source['source_url'] ?? ''));
+        return $url !== '' && $this->validHttpUrl($url);
     }
 
     private function isMissing(mixed $value): bool
@@ -158,6 +170,9 @@ class JobMissingDataFetcher
         $instructions = <<<'TXT'
 You research Indian government recruitment records for an admin review system.
 Use web search. Fill ONLY the requested missing fields. Never overwrite or propose changes to existing values.
+COST RULE: group every requested missing field into ONE comprehensive web search. Do not run one search per field.
+You may use a SECOND web search only when the first comprehensive search cannot resolve important remaining fields. Never use more than two searches total.
+Do not repeat an identical query and do not search the same URL repeatedly in this operation.
 Prefer evidence in this order: official recruitment notification/PDF, official recruiting authority website, other government website, then reputable secondary source only when official evidence is unavailable.
 For every returned field, provide a source URL that supports that exact value. If the source is a PDF and the page is known, include the page.
 Do not invent, infer from convention, or use generic defaults. If reliable evidence cannot be found, put the field in not_found and do not return a result for it.
@@ -174,6 +189,10 @@ TXT;
                 'search_context_size'=>'medium',
                 'user_location'=>['type'=>'approximate','country'=>'IN'],
             ]],
+            // Only web_search is exposed, so this is a hard ceiling of two searches
+            // for one Fetch All Data operation.
+            'max_tool_calls'=>2,
+            'parallel_tool_calls'=>false,
             'include'=>['web_search_call.action.sources'],
             'text'=>['format'=>[
                 'type'=>'json_schema',
