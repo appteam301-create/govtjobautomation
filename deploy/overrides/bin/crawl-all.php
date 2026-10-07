@@ -11,11 +11,15 @@ $app=require __DIR__.'/../bootstrap/app.php';
 $app->make(Kernel::class)->bootstrap();
 
 try{
-    $today=\Carbon\Carbon::today(config('app.timezone','Asia/Kolkata'))->toDateString();
+    $todayCarbon=\Carbon\Carbon::today(config('app.timezone','Asia/Kolkata'));
+    $today=$todayCarbon->toDateString();
+    $maxDate=$todayCarbon->copy()->addMonthsNoOverflow(18)->toDateString();
+
     JobCandidate::query()
-        ->where(function($q) use($today){
+        ->where(function($q) use($today,$maxDate){
             $q->whereNull('application_last_date')
-              ->orWhereDate('application_last_date','<=',$today);
+              ->orWhereDate('application_last_date','<=',$today)
+              ->orWhereDate('application_last_date','>',$maxDate);
         })
         ->delete();
 }catch(\Throwable $e){
