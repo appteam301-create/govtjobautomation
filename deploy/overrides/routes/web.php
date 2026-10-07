@@ -14,11 +14,14 @@ Route::post('/sources/clear-all', [GovernmentSourceController::class,'clearAllDa
 Route::get('/sources/crawl-status', [GovernmentSourceController::class,'crawlStatus'])->name('sources.crawlStatus');
 Route::post('/sources/{source}/toggle', [GovernmentSourceController::class,'toggle'])->name('sources.toggle');
 Route::get('/reviews', function () {
-    $today=\Carbon\Carbon::today(config('app.timezone','Asia/Kolkata'))->toDateString();
+    $today=\Carbon\Carbon::today(config('app.timezone','Asia/Kolkata'));
+    $maxDate=$today->copy()->addMonthsNoOverflow(18)->toDateString();
+    $todayString=$today->toDateString();
 
     $candidates=JobCandidate::query()
         ->whereNotNull('application_last_date')
-        ->whereDate('application_last_date','>',$today)
+        ->whereDate('application_last_date','>',$todayString)
+        ->whereDate('application_last_date','<=',$maxDate)
         ->latest()
         ->paginate(50);
 
