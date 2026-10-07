@@ -376,7 +376,7 @@ class ProcessDiscoveredDocument implements ShouldQueue
         $t = mb_strtolower($this->cleanWhitespace($text));
         if ($t === '') return false;
 
-        return (bool)preg_match('/\\b(final result|provisional result|result of|selected candidates?|provisionally selected|waitlisted|selection list|admit card|hall ticket|provisional answer keys?|answer keys?|merit list|shortlist|shortlisted|eligible candidates?|ineligible candidates?|document verification|interview schedule|exam schedule|examination schedule|objection|response sheet|cut[ -]?off|appointment order|limited departmental competitive examination|departmental competitive examination|departmental quota|promotion to the post|promotion to the cadre|subscribe for updates|last updated|visitor count|visitors|tender|procurement|auction|cancelled|cancellation|withdrawn)\\b/u', $t);
+        return (bool)preg_match('/\\b(final result|provisional result|result of|selected candidates?|provisionally selected|waitlisted|selection list|admit card|hall ticket|provisional answer keys?|answer keys?|merit list|shortlist|shortlisted|eligible candidates?|ineligible candidates?|document verification|interview schedule|exam schedule|examination schedule|objection|response sheet|cut[ -]?off|appointment order|limited departmental competitive examination|departmental competitive examination|departmental quota|promotion to the post|promotion to the cadre|subscribe for updates|last updated|visitor count|visitors|tender|procurement|auction|corrigendum|addendum|extension of (?:last|due) date|revised notice|cancelled|cancellation|withdrawn)\\b/u', $t);
     }
 
     private function looksLikeVacancy(string $text): bool
