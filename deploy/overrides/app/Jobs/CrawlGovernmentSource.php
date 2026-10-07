@@ -262,12 +262,12 @@ class CrawlGovernmentSource implements ShouldQueue
             try {
                 $date = Carbon::createFromFormat($format, $value, $tz);
                 if ($date !== false) return $date->format('Y-m-d');
-            } catch (\\Throwable $e) {}
+            } catch (\Throwable $e) {}
         }
 
         try {
             return Carbon::parse($value, $tz)->format('Y-m-d');
-        } catch (\\Throwable $e) {
+        } catch (\Throwable $e) {
             return null;
         }
     }
