@@ -1,0 +1,13 @@
+name: Export Final ZIP
+on:
+  push:
+    branches: [main]
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: latestgovtjobs-automation-full
+          path: latestgovtjobs-automation-full.zip
