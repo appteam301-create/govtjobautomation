@@ -3,10 +3,37 @@ namespace App\Http\Controllers;
 
 use App\Models\JobCandidate;
 use App\Services\Extraction\JobDetailsEnricher;
+use App\Services\Extraction\JobMissingDataFetcher;
 use Illuminate\Http\Request;
 
 class JobDetailsController extends Controller
 {
+
+    public function fetchAllData(JobCandidate $candidate, JobMissingDataFetcher $fetcher)
+    {
+        try {
+            $result = $fetcher->fetch($candidate);
+            $names = array_map(fn($field) => ucwords(str_replace('_',' ',$field)), $result['not_found'] ?? []);
+            $message = 'Successfully fetched '.(int)($result['fetched_count'] ?? 0).' fields.';
+            if ($names) {
+                $message .= ' Could not find: '.implode(', ', $names).'.';
+            }
+            session()->flash('status', $message);
+
+            return response()->json([
+                'ok'=>true,
+                ...$result,
+                'message'=>$message,
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+            return response()->json([
+                'ok'=>false,
+                'message'=>$e->getMessage(),
+            ], 422);
+        }
+    }
+
     public function update(Request $request, JobCandidate $candidate)
     {
         $fields = JobDetailsEnricher::FIELDS;
