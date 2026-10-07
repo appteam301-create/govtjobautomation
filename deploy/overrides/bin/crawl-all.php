@@ -124,7 +124,17 @@ for($i=$nextIndex;$i<count($sourceOrder);$i++){
         $message=mb_substr($e->getMessage(),0,500);
         $state['sources'][(string)$sourceId]['status']='failed';
         $state['sources'][(string)$sourceId]['error']=$message;
-        $state['errors'][]=['source_id'=>$sourceId,'name'=>$source?->name,'message'=>$message];
+        $state['sources'][(string)$sourceId]['error_class']=get_class($e);
+        $state['sources'][(string)$sourceId]['error_file']=$e->getFile();
+        $state['sources'][(string)$sourceId]['error_line']=$e->getLine();
+        $state['errors'][]=[
+            'source_id'=>$sourceId,
+            'name'=>$source?->name,
+            'message'=>$message,
+            'class'=>get_class($e),
+            'file'=>$e->getFile(),
+            'line'=>$e->getLine(),
+        ];
         report($e);
     }
 
