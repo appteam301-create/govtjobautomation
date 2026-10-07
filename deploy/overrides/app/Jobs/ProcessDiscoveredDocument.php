@@ -250,8 +250,20 @@ class ProcessDiscoveredDocument implements ShouldQueue
             if ($parsed) return $parsed;
         }
 
-        // Never infer a deadline from arbitrary future dates, exam dates, vacancy-year ranges,
-        // publication dates, interview dates or result dates.
+        // Trusted recruitment listings commonly show Opening Date + Last Date as
+        // table columns without repeating the column labels inside each row. When the
+        // row is already known to be a vacancy and contains at least two valid dates,
+        // the latest row date is the application deadline.
+        if ($listingTrusted) {
+            $dates = $this->extractAllDates($context !== '' ? $context : mb_substr($raw, 0, 3500));
+            if (count($dates) >= 2) {
+                sort($dates);
+                return end($dates) ?: null;
+            }
+        }
+
+        // Never infer a deadline from a single arbitrary future date, because it may
+        // be a publication, exam, interview or result date.
         return null;
     }
 
