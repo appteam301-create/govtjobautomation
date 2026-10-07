@@ -29,4 +29,5 @@ Route::get('/reviews', function () {
 })->name('reviews.index');
 Route::get('/reviews/{candidate}', [ReviewController::class,'show'])->name('reviews.show');
 Route::post('/reviews/{candidate}/details', [JobDetailsController::class,'update'])->name('reviews.details');
+Route::post('/reviews/{candidate}/fetch-all-data', [JobDetailsController::class,'fetchAllData'])->name('reviews.fetchAllData');
 Route::post('/reviews/{candidate}', [ReviewController::class,'decide'])->name('reviews.decide');
