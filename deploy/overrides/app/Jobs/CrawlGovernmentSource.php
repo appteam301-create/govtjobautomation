@@ -84,13 +84,33 @@ class CrawlGovernmentSource implements ShouldQueue
             if (!$items && $httpError && !$browserError) throw $httpError;
 
             $candidateItems = $this->filterCandidates($items, $listing);
-            $maxItems = max(10, min(120, (int)($settings['max_items'] ?? 80)));
+            $maxItems = max(10, min(40, (int)($settings['max_items'] ?? 40)));
             $candidateItems = array_slice($candidateItems, 0, $maxItems);
 
             $newDocuments = 0;
             $documentErrors = 0;
+            $skippedForBudget = 0;
+            $unknownDeadlineProcessed = 0;
+            $maxUnknownDeadline = $listing ? 12 : 18;
+            $sourceStartedAt = microtime(true);
+            $sourceBudgetSeconds = 75;
 
             foreach ($candidateItems as $item) {
+                if ((microtime(true) - $sourceStartedAt) >= $sourceBudgetSeconds) {
+                    $skippedForBudget++;
+                    break;
+                }
+
+                $itemText = $this->clean((string)($item['context'] ?? '') . ' ' . (string)($item['title'] ?? ''));
+                $itemDateState = $listing ? $this->listingDateState($itemText) : 0;
+
+                if ($itemDateState === 0) {
+                    if ($unknownDeadlineProcessed >= $maxUnknownDeadline) {
+                        $skippedForBudget++;
+                        continue;
+                    }
+                    $unknownDeadlineProcessed++;
+                }
                 if (is_file('/data/crawl-reset.flag')) return;
 
                 try {
@@ -137,6 +157,8 @@ class CrawlGovernmentSource implements ShouldQueue
                     'candidate_links' => count($candidateItems),
                     'new_documents' => $newDocuments,
                     'document_errors' => $documentErrors,
+                    'skipped_for_budget' => $skippedForBudget,
+                    'unknown_deadline_processed' => $unknownDeadlineProcessed,
                     'http_error' => $httpError ? mb_substr($httpError->getMessage(), 0, 300) : null,
                     'browser_error' => $browserError ? mb_substr($browserError->getMessage(), 0, 300) : null,
                 ],
