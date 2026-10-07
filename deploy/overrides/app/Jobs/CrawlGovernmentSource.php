@@ -198,7 +198,7 @@ class CrawlGovernmentSource implements ShouldQueue
 
     private function filterCandidates(array $items, bool $listing): array
     {
-        $bad = '/\\b(final result|provisional result|result of|document verification|admit card|hall ticket|answer key|merit list|shortlist|shortlisted|eligibility list|tender|procurement|auction|objection|cut[ -]?off|interview schedule|exam schedule|expression of interest|cancelled|cancellation|withdrawn)\\b/u';
+        $bad = '/\\b(final result|provisional result|result of|document verification|admit card|hall ticket|answer key|merit list|shortlist|shortlisted|eligibility list|tender|procurement|auction|objection|cut[ -]?off|interview schedule|exam schedule|expression of interest|corrigendum|addendum|extension of (?:last|due) date|revised notice|cancelled|cancellation|withdrawn)\\b/u';
         $positive = '/\\b(recruit(?:ment|ing)?|vacanc(?:y|ies)|applications? invited|apply online|walk[ -]?in|apprentice(?:ship)?|engagement|posts?|hiring|agniveer|constable|sub[ -]?inspector|resident|consultant|professor|director|registrar|librarian|accountant|scientist|research (?:associate|fellow|scientist)|project (?:staff|associate|assistant|scientist|officer)|staff nurse|engineer|officer|assistant|clerk|manager|executive|technician|stenographer|trainee|fellowship|tutor|demonstrator|driver|attendant|tradesman|multi[ -]?tasking staff|mts|data entry operator|deo)\\b/u';
 
         $scored = [];
