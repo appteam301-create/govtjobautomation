@@ -47,7 +47,7 @@ class HtmlDiscovery
 
     private function addSyntheticListingRows(Crawler $crawler, string $baseUrl, array &$items): void
     {
-        foreach (['table tr','li','article','.views-row','.list-group-item','.card','.notice','.item','.news-item','.recruitment','.vacancy'] as $selector) {
+        foreach (['table tr','li','article','.views-row','.list-group-item','.card','.notice','.news-item'] as $selector) {
             try {
                 $crawler->filter($selector)->each(function (Crawler $node) use (&$items, $baseUrl) {
                     $context = $this->clean((string)$node->text('', true));
@@ -114,7 +114,10 @@ class HtmlDiscovery
 
         if (preg_match('/\\b(final result|provisional result|admit card|answer key|merit list|shortlist|tender|procurement|auction|cancelled|cancellation)\\b/u', $t)) return false;
 
-        $hasDate = (bool)preg_match('/\\b\\d{1,2}[\\/\\-.]\\d{1,2}[\\/\\-.]\\d{2,4}\\b|\\b\\d{1,2}\\s+[A-Za-z]{3,9}\\s+\\d{4}\\b/i', $text);
+        $dateCount = preg_match_all('/\\b\\d{1,2}[\\/\\-.]\\d{1,2}[\\/\\-.]\\d{2,4}\\b|\\b\\d{4}[\\/\\-.]\\d{1,2}[\\/\\-.]\\d{1,2}\\b|\\b\\d{1,2}\\s+[A-Za-z]{3,9}\\s+\\d{2,4}\\b|\\b[A-Za-z]{3,9}\\s+\\d{1,2},?\\s+\\d{2,4}\\b/i', $text);
+        if ($dateCount !== false && $dateCount > 4) return false;
+
+        $hasDate = $dateCount > 0;
         $hasJobWord = (bool)preg_match('/\\b(recruit(?:ment|ing)?|vacanc(?:y|ies)|applications? invited|walk[ -]?in|apprentice|engagement|posts?|resident|consultant|professor|scientist|engineer|officer|assistant|clerk|manager|technician|stenographer|trainee|fellowship|driver|attendant|mts|data entry operator)\\b/u', $t);
         $hasDownload = (bool)preg_match('/\\b(download|view|pdf|notification|advertisement|apply)\\b/u', $t);
 
