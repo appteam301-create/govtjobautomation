@@ -41,6 +41,10 @@ class ProcessDiscoveredDocument implements ShouldQueue
 
         if ($this->isClearlyNotVacancy($seedText)) return;
 
+        // Trusted recruitment pages still contain navigation/subscription/archive links.
+        // Require a vacancy/application signal in the actual row before following it.
+        if ($listingTrusted && !$this->trustedListingLooksLikeVacancy($title, $context)) return;
+
         // Fast expiry check from the recruitment-list row before downloading a detail page/PDF.
         $seedDeadline = $this->findLastDate($seedText, $context, $listingTrusted);
         if ($seedDeadline && !$this->isFutureLastDate($seedDeadline)) {
@@ -360,13 +364,25 @@ class ProcessDiscoveredDocument implements ShouldQueue
         $t = mb_strtolower($this->cleanWhitespace($text));
         if ($t === '') return false;
 
-        return (bool)preg_match('/\\b(final result|provisional result|result of|selected candidates?|provisionally selected|waitlisted|selection list|admit card|hall ticket|provisional answer keys?|answer keys?|merit list|shortlist|shortlisted|eligible candidates?|ineligible candidates?|document verification|interview schedule|exam schedule|examination schedule|objection|response sheet|cut[ -]?off|appointment order|limited departmental competitive examination|departmental competitive examination|departmental quota|promotion to the post|promotion to the cadre|tender|procurement|auction|cancelled|cancellation|withdrawn)\\b/u', $t);
+        return (bool)preg_match('/\\b(final result|provisional result|result of|selected candidates?|provisionally selected|waitlisted|selection list|admit card|hall ticket|provisional answer keys?|answer keys?|merit list|shortlist|shortlisted|eligible candidates?|ineligible candidates?|document verification|interview schedule|exam schedule|examination schedule|objection|response sheet|cut[ -]?off|appointment order|limited departmental competitive examination|departmental competitive examination|departmental quota|promotion to the post|promotion to the cadre|subscribe for updates|last updated|visitor count|visitors|tender|procurement|auction|cancelled|cancellation|withdrawn)\\b/u', $t);
     }
 
     private function looksLikeVacancy(string $text): bool
     {
         $t = mb_strtolower($this->cleanWhitespace($text));
         return (bool)preg_match('/\\b(recruit(?:ment|ing)?|vacanc(?:y|ies)|applications? invited|apply online|walk[ -]?in|apprentice(?:ship)?|engagement|posts?|hiring|agniveer|constable|sub[ -]?inspector|resident|consultant|professor|director|registrar|librarian|accountant|scientist|research fellow|project (?:staff|associate|assistant|scientist|officer)|staff nurse|engineer|officer|assistant|clerk|manager|executive|technician|stenographer|trainee|fellowship|tutor|demonstrator|driver|attendant|tradesman|multi[ -]?tasking staff|mts|data entry operator|deo)\\b/u', $t);
+    }
+
+    private function trustedListingLooksLikeVacancy(string $title, string $context): bool
+    {
+        $text = mb_strtolower($this->cleanWhitespace($title . ' ' . $context));
+        if ($text === '' || $this->isClearlyNotVacancy($text)) return false;
+
+        if (preg_match('/\\b(subscribe|archive|home|contact|about us|last updated|visitors?|sitemap|feedback|login|register portal)\\b/u', $text)) {
+            return false;
+        }
+
+        return (bool)preg_match('/\\b(apply|application|applications|recruit(?:ment|ing)?|vacanc(?:y|ies)|walk[ -]?in|apprentice(?:ship)?|engagement|post(?:s)?|hiring|selection for the post|invites? eligible candidates|invites? applications?)\\b/u', $text);
     }
 
     private function cleanWhitespace(string $value): string
