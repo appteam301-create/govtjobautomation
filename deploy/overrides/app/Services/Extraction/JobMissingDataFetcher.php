@@ -173,8 +173,10 @@ Use web search. Fill ONLY the requested missing fields. Never overwrite or propo
 COST RULE: group every requested missing field into ONE comprehensive web search. Do not run one search per field.
 You may use a SECOND web search only when the first comprehensive search cannot resolve important remaining fields. Never use more than two searches total.
 Do not repeat an identical query and do not search the same URL repeatedly in this operation.
-Prefer evidence in this order: official recruitment notification/PDF, official recruiting authority website, other government website, then reputable secondary source only when official evidence is unavailable.
-For every returned field, provide a source URL that supports that exact value. If the source is a PDF and the page is known, include the page.
+FIRST inspect the job's existing Official Evidence URLs from the provided context, especially notification_pdf_url and official_source_url. Treat those as the highest-priority sources before searching the wider web.
+When either Official Evidence URL is available, try to extract as many missing fields as possible from those sources within the first comprehensive search.
+Prefer evidence in this order: provided official notification/PDF, provided official source URL, other official recruiting authority pages, other government websites, then reputable secondary source only when official evidence is unavailable.
+For every returned field, provide the exact source URL that supports that value. If the source is a PDF and the page is known, include the page.
 Do not invent, infer from convention, or use generic defaults. If reliable evidence cannot be found, put the field in not_found and do not return a result for it.
 Keep source_excerpt as a short paraphrase of the supporting evidence.
 Dates must be YYYY-MM-DD. Numeric fields must contain only the numeric value in the value string.
@@ -183,7 +185,7 @@ TXT;
         return [
             'model'=>config('services.openai.model','gpt-6-luna'),
             'instructions'=>$instructions,
-            'input'=>"Current job context:\n".json_encode($context, JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)."\n\nMissing fields:\n".implode(', ', $missing),
+            'input'=>"Current job context:\n".json_encode($context, JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)."\n\nIMPORTANT OFFICIAL EVIDENCE:\nOfficial source URL: ".($candidate->official_source_url ?: 'none')."\nNotification PDF URL: ".($candidate->notification_pdf_url ?: 'none')."\n\nMissing fields:\n".implode(', ', $missing),
             'tools'=>[[
                 'type'=>'web_search',
                 'search_context_size'=>'medium',
