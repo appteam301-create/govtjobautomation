@@ -224,8 +224,8 @@ class ProcessDiscoveredDocument implements ShouldQueue
             'closing date of online application','closing date for online application',
             'closing date of application','closing date for application','online registration closes',
             'application end date','last date to apply','last date for application',
-            'last date of application','last date','end date','closing date','closing on','apply by',
-            'applications close','application closes','upto','up to',
+            'last date of application','last date','closing date','closing on','apply by',
+            'applications close','application closes'
         ];
 
         $datePattern = $this->datePattern();
@@ -238,18 +238,16 @@ class ProcessDiscoveredDocument implements ShouldQueue
             }
         }
 
-        if (preg_match('/' . $datePattern . '\\s*(?:to|till|until|–|-)\\s*' . $datePattern . '/iu', $raw, $m)) {
-            $parsed = $this->parseGovDate($m[2]);
+        // Some official recruitment tables expose explicit Start Date / End Date columns.
+        // Accept an End Date only when the surrounding row clearly identifies it as a deadline.
+        $row = $context !== '' ? $context : mb_substr($raw, 0, 3500);
+        if (preg_match('/(?:end date|last date|closing date)[^\\d]{0,40}' . $datePattern . '/isu', $row, $m)) {
+            $parsed = $this->parseGovDate($m[1]);
             if ($parsed) return $parsed;
         }
 
-        if ($listingTrusted) {
-            $dates = $this->extractAllDates($context !== '' ? $context : mb_substr($raw, 0, 3500));
-            $future = array_values(array_filter($dates, fn(string $d) => $this->isFutureLastDate($d)));
-            sort($future);
-            if ($future) return end($future) ?: null;
-        }
-
+        // Never infer a deadline from arbitrary future dates, exam dates, vacancy-year ranges,
+        // publication dates, interview dates or result dates.
         return null;
     }
 
@@ -362,7 +360,7 @@ class ProcessDiscoveredDocument implements ShouldQueue
         $t = mb_strtolower($this->cleanWhitespace($text));
         if ($t === '') return false;
 
-        return (bool)preg_match('/\\b(final result|provisional result|result of|admit card|hall ticket|answer key|merit list|shortlist|shortlisted|document verification|interview schedule|exam schedule|examination schedule|objection|response sheet|cut[ -]?off|appointment order|tender|procurement|auction|cancelled|cancellation|withdrawn)\\b/u', $t);
+        return (bool)preg_match('/\\b(final result|provisional result|result of|selected candidates?|provisionally selected|waitlisted|selection list|admit card|hall ticket|provisional answer keys?|answer keys?|merit list|shortlist|shortlisted|eligible candidates?|ineligible candidates?|document verification|interview schedule|exam schedule|examination schedule|objection|response sheet|cut[ -]?off|appointment order|limited departmental competitive examination|departmental competitive examination|departmental quota|promotion to the post|promotion to the cadre|tender|procurement|auction|cancelled|cancellation|withdrawn)\\b/u', $t);
     }
 
     private function looksLikeVacancy(string $text): bool
