@@ -1,0 +1,26 @@
+name: Package Project ZIP
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Create project zip
+        run: |
+          zip -r latestgovtjobs-automation-full.zip . -x ".git/*" ".github/workflows/package-project.yml"
+      - name: Upload project zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: latestgovtjobs-automation-full
+          path: latestgovtjobs-automation-full.zip
+          if-no-files-found: error
+          retention-days: 7
