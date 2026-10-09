@@ -1,6 +1,6 @@
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Review Job</title><style>
-body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:#f4f6f8;color:#111827}nav{background:#111827;padding:14px 24px}nav a{color:#fff;text-decoration:none;margin-right:20px}.wrap{max-width:1280px;margin:28px auto;padding:0 18px}.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:18px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.full{grid-column:1/-1}label{font-weight:600;font-size:14px}input,select,textarea{width:100%;padding:10px;border:1px solid #d1d5db;border-radius:7px;box-sizing:border-box;margin:5px 0 4px}textarea{min-height:110px}.pending{font-size:12px;color:#b45309;margin-bottom:8px}.ok{font-size:12px;color:#166534;margin-bottom:8px}.btn{background:#111827;color:#fff;border:0;border-radius:7px;padding:10px 14px;cursor:pointer}.save{background:#1d4ed8}.approve{background:#166534}.reject{background:#991b1b}.flash{background:#ecfdf5;border:1px solid #a7f3d0;padding:12px;border-radius:8px;margin-bottom:16px}.evidence{white-space:pre-wrap;max-height:600px;overflow:auto;background:#f9fafb;padding:14px;border-radius:8px}.title-row{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}.fetch-btn{background:#7c3aed}.fetch-btn[disabled]{opacity:.65;cursor:not-allowed}.ai-source{font-size:12px;margin:5px 0 8px;padding:7px 9px;border-radius:7px;background:#f5f3ff;border:1px solid #ddd6fe;color:#5b21b6}.ai-source a{color:#5b21b6;font-weight:700}.progress-box{display:none;margin-top:14px;padding:12px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe}.progress-box.show{display:block}.progress-line{font-weight:600;color:#1d4ed8}.fetch-error{color:#991b1b}.fetch-success{color:#166534}@media(max-width:800px){.grid{grid-template-columns:1fr}}
-</style></head><body><nav><a href="/">Dashboard</a><a href="/sources">Sources</a><a href="/reviews">Review Queue</a></nav><main class="wrap"><?php if(session('status')): ?><div class="flash"><?= e(session('status')) ?></div><?php endif; ?><?php $d=is_array($candidate->extracted_data)?$candidate->extracted_data:[]; $pending=$d['pending_fields']??[]; $claudePending=is_array($d['claude_pending_approval']??null)?$d['claude_pending_approval']:[]; $sources=is_array($d['field_sources']??null)?$d['field_sources']:[]; $v=fn($k,$fallback=null)=>$d[$k]??$fallback; $mark=function($k) use ($pending,$claudePending){ if(in_array($k,$claudePending,true)) return '<div class="pending">Claude fetched · Pending admin approval</div>'; return in_array($k,$pending,true)?'<div class="pending">Pending</div>':'<div class="ok">Extracted / provided</div>'; }; $sourceMark=function($k) use ($sources){ $s=$sources[$k]??null; if(!is_array($s)) return ''; $provider=(string)($s['provider']??''); $url=(string)($s['source_url']??''); if($provider==='claude_unavailable'){ $ref=$s['reference']??'Reliable source unavailable.'; return '<div class="ai-source"><strong>Source unavailable</strong>'.($ref?'<div>'.e($ref).'</div>':'').'</div>'; } if($url==='') return ''; $label=$provider==='claude_official_evidence'?'Claude · Official evidence':($provider==='claude_web_search'?'Claude · Web search':'AI/Web fetched'); if(!empty($s['needs_admin_approval'])) $label.=' · Admin approval required'; if(!empty($s['source_page'])) $label.=' · '.$s['source_page']; $title=$s['source_title']??'View source'; $ref=$s['reference']??null; return '<div class="ai-source"><strong>'.e($label).'</strong> · <a target="_blank" rel="noopener" href="'.e($url).'">'.e($title).'</a>'.($ref?'<div>'.e($ref).'</div>':'').'</div>'; }; ?><div class="card"><div class="title-row"><h1>Job Review</h1><button type="button" id="fetchAllDataBtn" class="btn fetch-btn" data-url="/reviews/<?= (int)$candidate->id ?>/fetch-all-data">Fetch All Data with Claude</button></div><div id="fetchProgress" class="progress-box"><div id="fetchProgressText" class="progress-line">Fetching missing job information...</div><div id="fetchProgressDetail" style="margin-top:6px"></div></div><p>Confidence: <strong><?= e($candidate->confidence_score) ?>%</strong>. Fields not found reliably are kept as <strong>Pending</strong>. Claude-fetched fields show their source URL and remain <strong>Pending admin approval</strong> until you approve this job.</p></div><form method="post" action="/reviews/<?= (int)$candidate->id ?>/details"><?= csrf_field() ?><div class="card"><div class="grid">
+body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:#f4f6f8;color:#111827}nav{background:#111827;padding:14px 24px}nav a{color:#fff;text-decoration:none;margin-right:20px}.wrap{max-width:1280px;margin:28px auto;padding:0 18px}.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:18px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.full{grid-column:1/-1}label{font-weight:600;font-size:14px}input,select,textarea{width:100%;padding:10px;border:1px solid #d1d5db;border-radius:7px;box-sizing:border-box;margin:5px 0 4px}textarea{min-height:110px}.pending{font-size:12px;color:#b45309;margin-bottom:8px}.ok{font-size:12px;color:#166534;margin-bottom:8px}.btn{background:#111827;color:#fff;border:0;border-radius:7px;padding:10px 14px;cursor:pointer}.save{background:#1d4ed8}.approve{background:#166534}.reject{background:#991b1b}.flash{background:#ecfdf5;border:1px solid #a7f3d0;padding:12px;border-radius:8px;margin-bottom:16px}.evidence{white-space:pre-wrap;max-height:600px;overflow:auto;background:#f9fafb;padding:14px;border-radius:8px}.title-row{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}.fetch-btn{background:#7c3aed}.retry-btn{background:#0369a1}.na-btn{background:#475569}.action-row{display:flex;gap:8px;flex-wrap:wrap}.fetch-btn[disabled]{opacity:.65;cursor:not-allowed}.ai-source{font-size:12px;margin:5px 0 8px;padding:7px 9px;border-radius:7px;background:#f5f3ff;border:1px solid #ddd6fe;color:#5b21b6}.ai-source a{color:#5b21b6;font-weight:700}.progress-box{display:none;margin-top:14px;padding:12px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe}.progress-box.show{display:block}.progress-line{font-weight:600;color:#1d4ed8}.fetch-error{color:#991b1b}.fetch-success{color:#166534}@media(max-width:800px){.grid{grid-template-columns:1fr}}
+</style></head><body><nav><a href="/">Dashboard</a><a href="/sources">Sources</a><a href="/reviews">Review Queue</a></nav><main class="wrap"><?php if(session('status')): ?><div class="flash"><?= e(session('status')) ?></div><?php endif; ?><?php $d=is_array($candidate->extracted_data)?$candidate->extracted_data:[]; $pending=$d['pending_fields']??[]; $claudePending=is_array($d['claude_pending_approval']??null)?$d['claude_pending_approval']:[]; $adminNA=is_array($d['admin_not_available_fields']??null)?$d['admin_not_available_fields']:[]; $sources=is_array($d['field_sources']??null)?$d['field_sources']:[]; $unavailableFields=array_keys(array_filter($sources,fn($s)=>is_array($s)&&(($s['provider']??null)==='claude_unavailable'))); $v=fn($k,$fallback=null)=>$d[$k]??$fallback; $mark=function($k) use ($pending,$claudePending,$adminNA){ if(in_array($k,$adminNA,true)) return '<div class="ok">Not Available · Admin approved</div>'; if(in_array($k,$claudePending,true)) return '<div class="pending">Claude fetched · Pending admin approval</div>'; return in_array($k,$pending,true)?'<div class="pending">Pending</div>':'<div class="ok">Extracted / provided</div>'; }; $sourceMark=function($k) use ($sources){ $s=$sources[$k]??null; if(!is_array($s)) return ''; $provider=(string)($s['provider']??''); $url=(string)($s['source_url']??''); if($provider==='admin_not_available'){ $ref=$s['reference']??'Admin approved this field as Not Available.'; return '<div class="ai-source"><strong>Not Available · Admin approved</strong>'.($ref?'<div>'.e($ref).'</div>':'').'</div>'; } if($provider==='claude_unavailable'){ $ref=$s['reference']??'Reliable source unavailable.'; return '<div class="ai-source"><strong>Source unavailable</strong>'.($ref?'<div>'.e($ref).'</div>':'').'</div>'; } if($url==='') return ''; $label=in_array($provider,['claude_official_evidence','claude_retry_official'],true)?'Claude · Official evidence':(in_array($provider,['claude_web_search','claude_retry_web_search'],true)?'Claude · Web search':'AI/Web fetched'); if(!empty($s['needs_admin_approval'])) $label.=' · Admin approval required'; if(!empty($s['source_page'])) $label.=' · '.$s['source_page']; $title=$s['source_title']??'View source'; $ref=$s['reference']??null; return '<div class="ai-source"><strong>'.e($label).'</strong> · <a target="_blank" rel="noopener" href="'.e($url).'">'.e($title).'</a>'.($ref?'<div>'.e($ref).'</div>':'').'</div>'; }; ?><div class="card"><div class="title-row"><h1>Job Review</h1><div class="action-row"><button type="button" id="fetchAllDataBtn" class="btn fetch-btn" data-url="/reviews/<?= (int)$candidate->id ?>/fetch-all-data">Fetch All Data with Claude</button><?php if(count($unavailableFields)>0): ?><button type="button" id="retryMissingBtn" class="btn retry-btn" data-url="/reviews/<?= (int)$candidate->id ?>/retry-missing-only">Retry Missing Only (<?= count($unavailableFields) ?>)</button><button type="button" id="approveUnavailableBtn" class="btn na-btn" data-url="/reviews/<?= (int)$candidate->id ?>/approve-unavailable">Approve Remaining as Not Available</button><?php endif; ?></div></div><div id="fetchProgress" class="progress-box"><div id="fetchProgressText" class="progress-line">Fetching missing job information...</div><div id="fetchProgressDetail" style="margin-top:6px"></div></div><p>Confidence: <strong><?= e($candidate->confidence_score) ?>%</strong>. Fields not found reliably are kept as <strong>Pending</strong>. Claude-fetched fields show their source URL and remain <strong>Pending admin approval</strong> until you approve this job. <strong>Retry Missing Only</strong> checks only Source unavailable fields, checks known official/related URLs first, then allows at most one targeted web search. If still unresolved, you can approve them as <strong>Not Available</strong>.</p></div><form method="post" action="/reviews/<?= (int)$candidate->id ?>/details"><?= csrf_field() ?><div class="card"><div class="grid">
 <div><label>Job Title *</label><input name="job_title" value="<?= e($v('job_title',$candidate->job_title)) ?>"><?= $mark('job_title') ?><?= $sourceMark('job_title') ?></div>
 <div><label>Organization *</label><input name="organization" value="<?= e($v('organization',$candidate->organization)) ?>"><?= $mark('organization') ?><?= $sourceMark('organization') ?></div>
 <div><label>Department</label><input name="department" value="<?= e($v('department')) ?>"><?= $mark('department') ?><?= $sourceMark('department') ?></div>
@@ -45,6 +45,8 @@ const btn=document.getElementById('fetchAllDataBtn');
 const box=document.getElementById('fetchProgress');
 const title=document.getElementById('fetchProgressText');
 const detail=document.getElementById('fetchProgressDetail');
+const retryBtn=document.getElementById('retryMissingBtn');
+const approveUnavailableBtn=document.getElementById('approveUnavailableBtn');
 if(!btn) return;
 const steps=[
 'Reading official notification/PDF first...',
@@ -90,5 +92,57 @@ btn.addEventListener('click',async function(){
     btn.disabled=false;
   }
 });
+
+async function runSecondaryAction(button, startText, steps, successPrefix){
+  if(!button) return;
+  button.disabled=true;
+  box.classList.add('show');
+  title.className='progress-line';
+  title.textContent=startText;
+  let i=0;
+  detail.textContent=steps[0];
+  const timer=setInterval(()=>{i=(i+1)%steps.length;detail.textContent=steps[i];},1200);
+  try{
+    const res=await fetch(button.dataset.url,{
+      method:'POST',
+      headers:{'Accept':'application/json','Content-Type':'application/json','X-CSRF-TOKEN':'<?= csrf_token() ?>'},
+      body:'{}'
+    });
+    const data=await res.json();
+    clearInterval(timer);
+    if(!res.ok||!data.ok) throw new Error(data.message||'Action failed.');
+    title.className='progress-line fetch-success';
+    title.textContent=successPrefix;
+    detail.textContent=data.message||'Completed.';
+    setTimeout(()=>window.location.reload(),1700);
+  }catch(e){
+    clearInterval(timer);
+    title.className='progress-line fetch-error';
+    title.textContent='Action failed';
+    detail.textContent=e.message||'Unable to complete action.';
+    button.disabled=false;
+  }
+}
+
+if(retryBtn){
+  retryBtn.addEventListener('click',()=>runSecondaryAction(
+    retryBtn,
+    'Retrying Source unavailable fields only...',
+    ['Checking related official URLs...','Reading official notification/page links...','Running one targeted fallback search if needed...','Validating sources...','Saving retry results...'],
+    'Retry completed'
+  ));
+}
+
+if(approveUnavailableBtn){
+  approveUnavailableBtn.addEventListener('click',()=>{
+    if(!confirm('Mark all remaining Source unavailable fields as Not Available with admin approval?')) return;
+    runSecondaryAction(
+      approveUnavailableBtn,
+      'Approving remaining unavailable fields...',
+      ['Marking unresolved fields as Not Available...','Saving admin approval...'],
+      'Not Available approval saved'
+    );
+  });
+}
 })();
 </script></body></html>
