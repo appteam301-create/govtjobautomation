@@ -21,9 +21,8 @@ return [
             'channel' => env('SLACK_BOT_USER_DEFAULT_CHANNEL'),
         ],
     ],
-
-    'openai' => [
-        'api_key' => env('OPENAI_API_KEY'),
-        'model' => env('OPENAI_MODEL', 'gpt-6-luna'),
+    'claude' => [
+        'api_key' => env('CLAUDE_API_KEY'),
+        'model' => env('CLAUDE_MODEL', 'claude-sonnet-5-5'),
     ],
 ];
