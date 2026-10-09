@@ -23,7 +23,8 @@ return [
     ],
     'claude' => [
         'api_key' => env('CLAUDE_API_KEY'),
-        'model' => env('CLAUDE_MODEL', 'claude-sonnet-5-5'),
+        'research_model' => env('CLAUDE_RESEARCH_MODEL', 'claude-sonnet-5-5'),
+        'fill_model' => env('CLAUDE_FILL_MODEL', 'claude-haiku-5-5'),
         'workspace_id' => env('ANTHROPIC_WORKSPACE_ID'),
     ],
 ];
