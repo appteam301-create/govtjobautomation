@@ -20,7 +20,7 @@ th{font-size:13px;color:#4b5563;background:#f9fafb}
 .btn{display:inline-block;background:#111827;color:#fff;text-decoration:none;border-radius:7px;padding:8px 12px;font-size:14px}
 .empty{text-align:center;padding:50px 15px;color:#6b7280}
 .flash{background:#ecfdf5;border:1px solid #a7f3d0;padding:12px;border-radius:8px;margin-bottom:16px}
-@media(max-width:760px){table{display:block;overflow-x:auto;white-space:nowrap}}
+.pagination{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap;margin-top:18px}.pagination a,.pagination span{display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:34px;padding:0 10px;border:1px solid #d1d5db;border-radius:7px;text-decoration:none;color:#111827;background:#fff;font-size:14px}.pagination a:hover{background:#f3f4f6}.pagination .active{background:#111827;color:#fff;border-color:#111827}.pagination .disabled{color:#9ca3af;background:#f9fafb;cursor:not-allowed}.page-summary{text-align:center;color:#6b7280;font-size:13px;margin-top:10px}@media(max-width:760px){table{display:block;overflow-x:auto;white-space:nowrap}}
 </style>
 </head>
 <body>
@@ -79,7 +79,46 @@ Run <b>Crawl Now — All Active Sources</b> from the Sources page.
 <?php endforeach; ?>
 </tbody>
 </table>
-<div style="margin-top:16px"><?= $candidates->links() ?></div>
+<?php if($candidates->hasPages()): ?>
+<div class="pagination">
+<?php if($candidates->onFirstPage()): ?>
+<span class="disabled">← Previous</span>
+<?php else: ?>
+<a href="<?= e($candidates->previousPageUrl()) ?>">← Previous</a>
+<?php endif; ?>
+
+<?php
+$start=max(1,$candidates->currentPage()-2);
+$end=min($candidates->lastPage(),$candidates->currentPage()+2);
+?>
+<?php if($start>1): ?>
+<a href="<?= e($candidates->url(1)) ?>">1</a>
+<?php if($start>2): ?><span class="disabled">…</span><?php endif; ?>
+<?php endif; ?>
+
+<?php for($page=$start;$page<=$end;$page++): ?>
+<?php if($page===$candidates->currentPage()): ?>
+<span class="active"><?= (int)$page ?></span>
+<?php else: ?>
+<a href="<?= e($candidates->url($page)) ?>"><?= (int)$page ?></a>
+<?php endif; ?>
+<?php endfor; ?>
+
+<?php if($end<$candidates->lastPage()): ?>
+<?php if($end<$candidates->lastPage()-1): ?><span class="disabled">…</span><?php endif; ?>
+<a href="<?= e($candidates->url($candidates->lastPage())) ?>"><?= (int)$candidates->lastPage() ?></a>
+<?php endif; ?>
+
+<?php if($candidates->hasMorePages()): ?>
+<a href="<?= e($candidates->nextPageUrl()) ?>">Next →</a>
+<?php else: ?>
+<span class="disabled">Next →</span>
+<?php endif; ?>
+</div>
+<div class="page-summary">
+Showing <?= (int)$candidates->firstItem() ?>–<?= (int)$candidates->lastItem() ?> of <?= (int)$candidates->total() ?> jobs
+</div>
+<?php endif; ?>
 <?php endif; ?>
 </div>
 </main>
