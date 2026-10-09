@@ -1,0 +1,17 @@
+name: Export Workspace Final ZIP
+on:
+  push:
+    branches: [main]
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create clean project ZIP
+        run: |
+          rm -f latestgovtjobs-automation-full.zip
+          zip -r LatestGovtJobs-Claude-Workspace-Final.zip . -x ".git/*" ".github/workflows/export-workspace-final.yml"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LatestGovtJobs-Claude-Workspace-Final
+          path: LatestGovtJobs-Claude-Workspace-Final.zip
