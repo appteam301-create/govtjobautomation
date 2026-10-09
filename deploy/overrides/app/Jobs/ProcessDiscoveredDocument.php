@@ -108,6 +108,7 @@ class ProcessDiscoveredDocument implements ShouldQueue
                 'official_notification_url' => (string)$doc->url,
                 'source_name' => $source->name,
                 'source_url' => $source->recruitment_url,
+                'discovered_from_url' => (string)($metadata['discovered_from'] ?? $source->recruitment_url),
                 'source_context' => $context,
             ],
         ];
