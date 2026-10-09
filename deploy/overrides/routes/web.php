@@ -30,6 +30,8 @@ Route::get('/reviews', function () {
 Route::get('/reviews/{candidate}', [ReviewController::class,'show'])->name('reviews.show');
 Route::post('/reviews/{candidate}/details', [JobDetailsController::class,'update'])->name('reviews.details');
 Route::post('/reviews/{candidate}/fetch-all-data', [JobDetailsController::class,'fetchAllData'])->name('reviews.fetchAllData');
+Route::post('/reviews/{candidate}/retry-missing-only', [JobDetailsController::class,'retryMissingOnly'])->name('reviews.retryMissingOnly');
+Route::post('/reviews/{candidate}/approve-unavailable', [JobDetailsController::class,'approveUnavailable'])->name('reviews.approveUnavailable');
 Route::post('/reviews/{candidate}', [ReviewController::class,'decide'])->name('reviews.decide');
 
 
