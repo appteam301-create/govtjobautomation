@@ -14,7 +14,16 @@ class JobDetailsController extends Controller
         try {
             $result = $fetcher->fetch($candidate);
             $names = array_map(fn($field) => ucwords(str_replace('_',' ',$field)), $result['not_found'] ?? []);
-            $message = 'Successfully fetched '.(int)($result['fetched_count'] ?? 0).' fields.';
+            $message = 'Successfully fetched '.(int)($result['fetched_count'] ?? 0).' fields with Claude.';
+            $mode = (string)($result['source_mode'] ?? '');
+            if (str_starts_with($mode, 'official_')) {
+                $message .= ' Official evidence was used; web search was not used.';
+            } elseif ($mode === 'claude_web_search') {
+                $message .= ' Official evidence was unavailable, so Claude web search was used '.(int)($result['web_searches_used'] ?? 0).' time(s).';
+            }
+            if (!empty($result['requires_admin_approval'])) {
+                $message .= ' Review the source shown for each fetched field and approve the job before publishing.';
+            }
             if ($names) {
                 $message .= ' Could not find: '.implode(', ', $names).'.';
             }
