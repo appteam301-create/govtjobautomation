@@ -308,11 +308,18 @@ TXT;
 
     private function callClaude(string $apiKey, array $payload, JobCandidate $candidate): array
     {
-        $response = Http::withHeaders([
+        $headers = [
             'x-api-key'=>$apiKey,
             'anthropic-version'=>'2023-06-01',
             'content-type'=>'application/json',
-        ])
+        ];
+
+        $workspaceId = trim((string) config('services.claude.workspace_id', ''));
+        if ($workspaceId !== '') {
+            $headers['anthropic-workspace-id'] = $workspaceId;
+        }
+
+        $response = Http::withHeaders($headers)
             ->acceptJson()
             ->asJson()
             ->timeout(180)
