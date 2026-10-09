@@ -47,6 +47,39 @@ class JobDetailsController extends Controller
         }
     }
 
+
+    public function retryMissingOnly(JobCandidate $candidate, JobMissingDataFetcher $fetcher)
+    {
+        try {
+            $result = $fetcher->retryMissingOnly($candidate);
+            $names = array_map(fn($field) => ucwords(str_replace('_',' ',$field)), $result['not_found'] ?? []);
+            $message = 'Retry fetched '.(int)($result['fetched_count'] ?? 0).' fields.';
+            $message .= ' Checked '.(int)($result['official_sources_checked'] ?? 0).' official/related source(s) first.';
+            $message .= ' Used '.(int)($result['web_searches_used'] ?? 0).' targeted web search(es) (max 1).';
+            if ($names) $message .= ' Still unavailable: '.implode(', ', $names).'.';
+
+            return response()->json(['ok'=>true,...$result,'message'=>$message]);
+        } catch (\Throwable $e) {
+            report($e);
+            return response()->json(['ok'=>false,'message'=>$e->getMessage()], 422);
+        }
+    }
+
+    public function approveUnavailable(JobCandidate $candidate, JobMissingDataFetcher $fetcher)
+    {
+        try {
+            $result = $fetcher->approveUnavailable($candidate);
+            return response()->json([
+                'ok'=>true,
+                ...$result,
+                'message'=>'Marked '.(int)($result['approved_count'] ?? 0).' remaining field(s) as Not Available with admin approval.',
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+            return response()->json(['ok'=>false,'message'=>$e->getMessage()], 422);
+        }
+    }
+
     public function update(Request $request, JobCandidate $candidate)
     {
         $fields = JobDetailsEnricher::FIELDS;
