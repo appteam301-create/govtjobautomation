@@ -155,6 +155,262 @@ class JobMissingDataFetcher
         ];
     }
 
+    public function retryMissingOnly(JobCandidate $candidate): array
+    {
+        $apiKey = trim((string) config('services.claude.api_key', ''));
+        if ($apiKey === '') {
+            throw new RuntimeException('CLAUDE_API_KEY is not configured on the server.');
+        }
+
+        $data = is_array($candidate->extracted_data) ? $candidate->extracted_data : [];
+        $references = is_array($data['field_sources'] ?? null) ? $data['field_sources'] : [];
+
+        // Retry ONLY fields that are still empty/pending and were previously marked unavailable.
+        $retryFields = array_values(array_filter(
+            JobDetailsEnricher::FIELDS,
+            fn($field) =>
+                !in_array($field, self::SKIP_FIELDS, true)
+                && $this->isMissing($data[$field] ?? null)
+                && (($references[$field]['provider'] ?? null) === 'claude_unavailable')
+        ));
+
+        if ($retryFields === []) {
+            return [
+                'fetched_count'=>0,
+                'fetched_fields'=>[],
+                'not_found'=>[],
+                'web_searches_used'=>0,
+                'message'=>'No Source unavailable fields need retry.',
+            ];
+        }
+
+        // Priority order: all already-known official/job URLs first, then ONE combined web search.
+        $officialBundle = $this->relatedOfficialEvidence($candidate, $data);
+        $body = $this->callClaude(
+            $apiKey,
+            $this->retryPayload($candidate, $data, $retryFields, $officialBundle),
+            $candidate
+        );
+
+        $structured = $this->structuredOutput($body);
+        $searchedUrls = $this->sourceUrls($body);
+        $webSearchesUsed = (int) data_get($body, 'usage.server_tool_use.web_search_requests', 0);
+        $officialUrls = array_map(fn($item) => $this->normalizeUrl($item['url']), $officialBundle);
+
+        $pendingApproval = is_array($data['claude_pending_approval'] ?? null) ? $data['claude_pending_approval'] : [];
+        $accepted = [];
+
+        foreach (($structured['results'] ?? []) as $row) {
+            if (!is_array($row)) continue;
+            $field = (string)($row['field'] ?? '');
+
+            // Never touch fields outside this retry set or fields that acquired a value meanwhile.
+            if (!in_array($field, $retryFields, true) || !$this->isMissing($data[$field] ?? null)) continue;
+
+            $confidence = (float)($row['confidence'] ?? 0);
+            $value = $this->normalizeValue($field, $row['value'] ?? null);
+            if ($confidence < 0.72 || $value === null || $value === '') continue;
+
+            $sourceUrl = trim((string)($row['source_url'] ?? ''));
+            $sourceKind = (string)($row['source_kind'] ?? '');
+
+            if ($sourceKind === 'official_evidence') {
+                if (!$this->validUrl($sourceUrl) || !in_array($this->normalizeUrl($sourceUrl), $officialUrls, true)) continue;
+                $provider = 'claude_retry_official';
+                $sourceTitle = $this->nullableString($row['source_title'] ?? null) ?: 'Related official source';
+            } elseif ($sourceKind === 'web_search') {
+                if (!$this->validUrl($sourceUrl)) continue;
+                if ($searchedUrls !== [] && !in_array($this->normalizeUrl($sourceUrl), $searchedUrls, true)) continue;
+                $provider = 'claude_retry_web_search';
+                $sourceTitle = $this->nullableString($row['source_title'] ?? null) ?: 'Claude targeted retry source';
+            } else {
+                continue;
+            }
+
+            $data[$field] = $value;
+            $references[$field] = [
+                'provider'=>$provider,
+                'source_url'=>$sourceUrl,
+                'source_title'=>$sourceTitle,
+                'source_page'=>$this->nullableString($row['source_page'] ?? null),
+                'reference'=>$this->nullableString($row['source_excerpt'] ?? null),
+                'confidence'=>$confidence,
+                'needs_admin_approval'=>true,
+                'retry_fetched_at'=>now()->toIso8601String(),
+            ];
+            $accepted[] = $field;
+            $pendingApproval[] = $field;
+        }
+
+        $accepted = array_values(array_unique($accepted));
+        $notFound = array_values(array_unique(array_filter(
+            array_merge($structured['not_found'] ?? [], array_diff($retryFields, $accepted)),
+            fn($field) => in_array($field, $retryFields, true)
+        )));
+
+        foreach ($notFound as $field) {
+            if (!$this->isMissing($data[$field] ?? null)) continue;
+            $references[$field] = [
+                'provider'=>'claude_unavailable',
+                'source_url'=>null,
+                'source_title'=>'Source unavailable',
+                'source_page'=>null,
+                'reference'=>'Still not verifiable after checking related official sources and one targeted fallback web search. Admin may approve this field as Not Available.',
+                'confidence'=>null,
+                'needs_admin_approval'=>false,
+                'retry_checked_at'=>now()->toIso8601String(),
+            ];
+        }
+
+        $data['field_sources'] = $references;
+        $data['claude_pending_approval'] = array_values(array_unique($pendingApproval));
+        $data['pending_fields'] = array_values(array_filter(
+            JobDetailsEnricher::FIELDS,
+            fn($field) => $this->isMissing($data[$field] ?? null)
+                && !in_array($field, $data['admin_not_available_fields'] ?? [], true)
+        ));
+
+        $candidate->extracted_data = $data;
+        if (!empty($data['job_title'])) $candidate->job_title = $data['job_title'];
+        if (!empty($data['organization'])) $candidate->organization = $data['organization'];
+        if (array_key_exists('total_vacancies',$data)) $candidate->total_vacancies = $data['total_vacancies'];
+        if (!empty($data['application_end_date'])) $candidate->application_last_date = $data['application_end_date'];
+        if (!empty($data['apply_url'])) $candidate->application_url = $data['apply_url'];
+        $candidate->save();
+
+        return [
+            'fetched_count'=>count($accepted),
+            'fetched_fields'=>$accepted,
+            'not_found'=>$notFound,
+            'web_searches_used'=>$webSearchesUsed,
+            'official_sources_checked'=>count($officialBundle),
+            'requires_admin_approval'=>count($accepted) > 0,
+        ];
+    }
+
+    public function approveUnavailable(JobCandidate $candidate): array
+    {
+        $data = is_array($candidate->extracted_data) ? $candidate->extracted_data : [];
+        $references = is_array($data['field_sources'] ?? null) ? $data['field_sources'] : [];
+        $approved = is_array($data['admin_not_available_fields'] ?? null) ? $data['admin_not_available_fields'] : [];
+
+        foreach (JobDetailsEnricher::FIELDS as $field) {
+            if (!$this->isMissing($data[$field] ?? null)) continue;
+            if (($references[$field]['provider'] ?? null) !== 'claude_unavailable') continue;
+
+            $references[$field] = [
+                'provider'=>'admin_not_available',
+                'source_url'=>null,
+                'source_title'=>'Not Available · Admin approved',
+                'source_page'=>null,
+                'reference'=>'Admin approved this field as Not Available after retry.',
+                'confidence'=>null,
+                'needs_admin_approval'=>false,
+                'approved_at'=>now()->toIso8601String(),
+            ];
+            $approved[] = $field;
+        }
+
+        $approved = array_values(array_unique($approved));
+        $data['field_sources'] = $references;
+        $data['admin_not_available_fields'] = $approved;
+        $data['pending_fields'] = array_values(array_filter(
+            JobDetailsEnricher::FIELDS,
+            fn($field) => $this->isMissing($data[$field] ?? null) && !in_array($field, $approved, true)
+        ));
+
+        $candidate->extracted_data = $data;
+        $candidate->save();
+
+        return ['approved_count'=>count($approved),'approved_fields'=>$approved];
+    }
+
+    private function relatedOfficialEvidence(JobCandidate $candidate, array $data): array
+    {
+        $urls = array_values(array_unique(array_filter([
+            (string)$candidate->notification_pdf_url,
+            (string)$candidate->official_source_url,
+            (string)$candidate->application_url,
+            (string)($data['official_notification_url'] ?? ''),
+            (string)($data['apply_url'] ?? ''),
+        ], fn($url) => $this->validUrl(trim($url)))));
+
+        $items = [];
+        foreach ($urls as $url) {
+            try {
+                $result = $this->httpFetcher->fetch($url);
+                $isPdf = str_contains(strtolower((string)$result->contentType), 'application/pdf')
+                    || str_ends_with(strtolower((string)(parse_url($result->url, PHP_URL_PATH) ?: '')), '.pdf');
+                $text = $isPdf
+                    ? (string)($this->pdfTextExtractor->extract($result->body)['text'] ?? '')
+                    : $this->contentNormalizer->text($result->body);
+
+                if (mb_strlen(trim($text)) < 120) continue;
+                $items[] = [
+                    'url'=>$result->url ?: $url,
+                    'title'=>$isPdf ? 'Official notification / related PDF' : 'Official / related recruitment page',
+                    'text'=>mb_substr(trim($text), 0, 30000),
+                ];
+            } catch (Throwable $e) {
+                Log::warning('Retry official source read failed', [
+                    'candidate_id'=>$candidate->id,
+                    'url'=>$url,
+                    'error'=>$e->getMessage(),
+                ]);
+            }
+        }
+
+        return $items;
+    }
+
+    private function retryPayload(JobCandidate $candidate, array $data, array $retryFields, array $officialBundle): array
+    {
+        $officialText = $officialBundle === []
+            ? 'No additional readable official/job source was available.'
+            : implode("\n\n--- OFFICIAL/RELATED SOURCE ---\n", array_map(
+                fn($item) => "URL: ".$item['url']."\n".$item['text'],
+                $officialBundle
+            ));
+
+        $system = <<<'TXT'
+You are performing a SECOND-PASS retry for Indian government recruitment data.
+
+STRICT RETRY RULES:
+1. Work ONLY on the listed Source unavailable fields. Do not change, restate, or propose edits to any existing field.
+2. Check the supplied official/related job sources FIRST and extract as many retry fields as they can verify.
+3. Only after exhausting those supplied sources, use web search for the remaining retry fields.
+4. You have at most ONE web search use. Combine ALL still-unresolved retry fields into that single targeted search.
+5. Prefer official government/recruitment sources in search results.
+6. Never guess or infer unsupported values. If not verified, put the field in not_found.
+7. Every result requires a supporting source URL and source_kind "official_evidence" or "web_search".
+8. Return ONLY valid JSON:
+{"results":[{"field":"...","value":"...","confidence":0.0,"source_kind":"official_evidence|web_search","source_url":"...","source_title":"...","source_page":null,"source_excerpt":"..."}],"not_found":["field_name"]}
+TXT;
+
+        return [
+            'model'=>config('services.claude.model','claude-sonnet-5-5'),
+            'max_tokens'=>5000,
+            'system'=>$system,
+            'messages'=>[[
+                'role'=>'user',
+                'content'=>"Job context:\n"
+                    .json_encode($this->context($candidate,$data), JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)
+                    ."\n\nSOURCE UNAVAILABLE FIELDS TO RETRY ONLY:\n".implode(', ', $retryFields)
+                    ."\n\nOFFICIAL/RELATED SOURCES TO CHECK FIRST:\n".$officialText,
+            ]],
+            'tools'=>[[
+                'type'=>'web_search_20250305',
+                'name'=>'web_search',
+                'max_uses'=>1,
+                'user_location'=>[
+                    'type'=>'approximate',
+                    'country'=>'IN',
+                    'timezone'=>'Asia/Kolkata',
+                ],
+            ]],
+        ];
+    }
+
     private function missingFields(array $data): array
     {
         $references = is_array($data['field_sources'] ?? null) ? $data['field_sources'] : [];
