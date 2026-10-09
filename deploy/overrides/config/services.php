@@ -24,5 +24,6 @@ return [
     'claude' => [
         'api_key' => env('CLAUDE_API_KEY'),
         'model' => env('CLAUDE_MODEL', 'claude-sonnet-5-5'),
+        'workspace_id' => env('ANTHROPIC_WORKSPACE_ID'),
     ],
 ];
