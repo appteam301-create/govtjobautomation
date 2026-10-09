@@ -16,10 +16,14 @@ class JobDetailsController extends Controller
             $names = array_map(fn($field) => ucwords(str_replace('_',' ',$field)), $result['not_found'] ?? []);
             $message = 'Successfully fetched '.(int)($result['fetched_count'] ?? 0).' fields with Claude.';
             $mode = (string)($result['source_mode'] ?? '');
-            if (str_starts_with($mode, 'official_')) {
-                $message .= ' Official evidence was used; web search was not used.';
-            } elseif ($mode === 'claude_web_search') {
-                $message .= ' Official evidence was unavailable, so Claude web search was used '.(int)($result['web_searches_used'] ?? 0).' time(s).';
+            $searches = (int)($result['web_searches_used'] ?? 0);
+            if ($mode === 'official_evidence_first') {
+                $message .= ' Official evidence was checked first.';
+                $message .= $searches > 0
+                    ? ' Claude then used '.$searches.' limited web search(es) only for unresolved fields.'
+                    : ' No web search was needed.';
+            } elseif ($mode === 'web_search_only') {
+                $message .= ' Official evidence was unavailable/unreadable, so Claude used '.$searches.' limited web search(es).';
             }
             if (!empty($result['requires_admin_approval'])) {
                 $message .= ' Review the source shown for each fetched field and approve the job before publishing.';
