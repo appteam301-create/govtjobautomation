@@ -53,9 +53,20 @@ class JobMissingDataFetcher
             $candidate
         );
 
-        $structured = $this->structuredOutput($body);
+        $research = $this->structuredOutput($body);
         $searchedUrls = $this->sourceUrls($body);
         $webSearchesUsed = (int) data_get($body, 'usage.server_tool_use.web_search_requests', 0);
+
+        // Stage 2: cheap Haiku pass converts Sonnet research into final form-ready values.
+        // No tools are exposed to Haiku, so all web research remains on Sonnet.
+        $structured = $this->fillWithHaiku(
+            $apiKey,
+            $candidate,
+            $data,
+            $missing,
+            $research,
+            $official !== null ? 'official_evidence_first' : 'web_search_only'
+        );
 
         $references = is_array($data['field_sources'] ?? null) ? $data['field_sources'] : [];
         $pendingApproval = is_array($data['claude_pending_approval'] ?? null) ? $data['claude_pending_approval'] : [];
@@ -192,9 +203,20 @@ class JobMissingDataFetcher
             $candidate
         );
 
-        $structured = $this->structuredOutput($body);
+        $research = $this->structuredOutput($body);
         $searchedUrls = $this->sourceUrls($body);
         $webSearchesUsed = (int) data_get($body, 'usage.server_tool_use.web_search_requests', 0);
+
+        // Retry also uses Sonnet for research/search and Haiku only for final form filling.
+        $structured = $this->fillWithHaiku(
+            $apiKey,
+            $candidate,
+            $data,
+            $retryFields,
+            $research,
+            'retry_missing_only'
+        );
+
         $officialUrls = array_map(fn($item) => $this->normalizeUrl($item['url']), $officialBundle);
 
         $pendingApproval = is_array($data['claude_pending_approval'] ?? null) ? $data['claude_pending_approval'] : [];
@@ -388,7 +410,7 @@ STRICT RETRY RULES:
 TXT;
 
         return [
-            'model'=>config('services.claude.model','claude-sonnet-5-5'),
+            'model'=>config('services.claude.research_model','claude-sonnet-5-5'),
             'max_tokens'=>5000,
             'system'=>$system,
             'messages'=>[[
@@ -539,7 +561,7 @@ STRICT RULES:
 TXT;
 
         return [
-            'model'=>config('services.claude.model','claude-sonnet-5-5'),
+            'model'=>config('services.claude.research_model','claude-sonnet-5-5'),
             'max_tokens'=>7000,
             'system'=>$system,
             'messages'=>[[
@@ -560,6 +582,56 @@ TXT;
                 ],
             ]],
         ];
+    }
+
+    private function fillWithHaiku(
+        string $apiKey,
+        JobCandidate $candidate,
+        array $data,
+        array $targetFields,
+        array $research,
+        string $mode
+    ): array {
+        $researchResults = is_array($research['results'] ?? null) ? $research['results'] : [];
+        $researchNotFound = is_array($research['not_found'] ?? null) ? $research['not_found'] : [];
+
+        if ($researchResults === []) {
+            return ['results'=>[], 'not_found'=>array_values(array_unique(array_merge($targetFields, $researchNotFound)))];
+        }
+
+        $payload = [
+            'model'=>config('services.claude.fill_model','claude-haiku-5-5'),
+            'max_tokens'=>3500,
+            'system'=><<<'TXT'
+You are the low-cost FORM FILLING stage for an Indian government recruitment admin system.
+
+You receive verified research produced by a stronger research model. You MUST NOT research the web, use memory, infer missing facts, or introduce any new source.
+Your only job is to convert the supplied verified research into final form-ready field values.
+
+STRICT RULES:
+1. Fill ONLY the requested target fields.
+2. Never modify or suggest changes to any existing non-empty field.
+3. Use ONLY facts present in RESEARCH RESULTS.
+4. Preserve each result's source_kind, source_url, source_title, source_page, and source_excerpt.
+5. If evidence is ambiguous, unsupported, or cannot safely map to the requested field, place that field in not_found.
+6. Dates must be YYYY-MM-DD. Numeric fields must contain only a numeric value.
+7. Do not guess employment type, age minimum, vacancy count, salary, category, or any other value from convention.
+8. Return ONLY valid JSON:
+{"results":[{"field":"...","value":"...","confidence":0.0,"source_kind":"official_evidence|web_search","source_url":"...","source_title":"...","source_page":null,"source_excerpt":"..."}],"not_found":["field_name"]}
+TXT,
+            'messages'=>[[
+                'role'=>'user',
+                'content'=>"MODE: {$mode}\n"
+                    ."TARGET FIELDS:\n".implode(', ', $targetFields)
+                    ."\n\nEXISTING FORM DATA (DO NOT OVERWRITE):\n"
+                    .json_encode($this->context($candidate,$data), JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)
+                    ."\n\nRESEARCH RESULTS FROM SONNET 5.5:\n"
+                    .json_encode(['results'=>$researchResults,'not_found'=>$researchNotFound], JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE),
+            ]],
+        ];
+
+        $body = $this->callClaude($apiKey, $payload, $candidate);
+        return $this->structuredOutput($body);
     }
 
     private function callClaude(string $apiKey, array $payload, JobCandidate $candidate): array
