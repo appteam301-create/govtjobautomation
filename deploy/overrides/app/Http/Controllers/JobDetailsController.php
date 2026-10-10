@@ -4,15 +4,43 @@ namespace App\Http\Controllers;
 use App\Models\JobCandidate;
 use App\Services\Extraction\JobDetailsEnricher;
 use App\Services\Extraction\JobMissingDataFetcher;
+use App\Services\Extraction\OfficialSupplementalEnricher;
+use App\Services\Extraction\PreviousQuestionPaperFinder;
 use Illuminate\Http\Request;
 
 class JobDetailsController extends Controller
 {
 
-    public function fetchAllData(JobCandidate $candidate, JobMissingDataFetcher $fetcher)
-    {
+    public function fetchAllData(
+        JobCandidate $candidate,
+        JobMissingDataFetcher $fetcher,
+        OfficialSupplementalEnricher $supplemental,
+        PreviousQuestionPaperFinder $questionPapers
+    ) {
         try {
             $result = $fetcher->fetch($candidate);
+
+            // Additive backfill only. Core Claude fetching flow remains unchanged.
+            $supplementalResult = ['updated_fields'=>[]];
+            try {
+                $supplementalResult = $supplemental->enrich($candidate->fresh());
+            } catch (\Throwable $e) {
+                report($e);
+            }
+
+            try {
+                $questionPapers->refreshForCandidate($candidate->fresh());
+            } catch (\Throwable $e) {
+                report($e);
+            }
+
+            $candidate->refresh();
+            $result['supplemental_updated_fields'] = $supplementalResult['updated_fields'] ?? [];
+            $result['previous_question_papers_count'] = count(
+                is_array(($candidate->extracted_data ?? [])['previous_question_papers'] ?? null)
+                    ? $candidate->extracted_data['previous_question_papers']
+                    : []
+            );
             $names = array_map(fn($field) => ucwords(str_replace('_',' ',$field)), $result['not_found'] ?? []);
             $message = 'Successfully fetched '.(int)($result['fetched_count'] ?? 0).' fields with Claude.';
             $mode = (string)($result['source_mode'] ?? '');
@@ -27,6 +55,15 @@ class JobDetailsController extends Controller
             }
             if (!empty($result['requires_admin_approval'])) {
                 $message .= ' Review the source shown for each fetched field and approve the job before publishing.';
+            }
+            if (!empty($result['supplemental_updated_fields'])) {
+                $message .= ' Official-source backfill updated: '.implode(', ', array_map(
+                    fn($field) => ucwords(str_replace('_',' ',$field)),
+                    $result['supplemental_updated_fields']
+                )).'.';
+            }
+            if (($result['previous_question_papers_count'] ?? 0) > 0) {
+                $message .= ' Previous-year question papers found: '.(int)$result['previous_question_papers_count'].'.';
             }
             if ($names) {
                 $message .= ' Could not find: '.implode(', ', $names).'.';
