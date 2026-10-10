@@ -11,6 +11,21 @@ use Throwable;
 
 class PreviousQuestionPaperFinder
 {
+    public function refreshForCandidate(JobCandidate $candidate): void
+    {
+        $source = $candidate->government_source_id
+            ? GovernmentSource::find($candidate->government_source_id)
+            : null;
+        $document = $candidate->discovered_document_id
+            ? DiscoveredDocument::find($candidate->discovered_document_id)
+            : null;
+
+        if (!$source || !$document) return;
+
+        $metadata = is_array($document->metadata) ? $document->metadata : [];
+        $this->findAndStore($candidate, $source, $document, $metadata);
+    }
+
     public function findAndStore(
         JobCandidate $candidate,
         GovernmentSource $source,
