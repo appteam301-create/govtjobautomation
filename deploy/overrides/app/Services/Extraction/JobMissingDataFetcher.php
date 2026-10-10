@@ -13,7 +13,7 @@ use Throwable;
 
 class JobMissingDataFetcher
 {
-    private const SKIP_FIELDS = ['featured_job','urgent_hiring','seo_title','seo_description','seo_keywords'];
+    private const SKIP_FIELDS = ['featured_job','urgent_hiring','seo_title','seo_description','seo_keywords','logo'];
     private const INTEGER_FIELDS = ['total_vacancies','age_minimum','age_maximum','salary_minimum','salary_maximum','application_fee'];
     private const DATE_FIELDS = ['application_start_date','application_end_date','exam_date','admit_card_date'];
 
