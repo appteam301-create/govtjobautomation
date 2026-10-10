@@ -7,14 +7,10 @@ use Carbon\Carbon;
 class JobDetailsEnricher
 {
     public const FIELDS = [
-        'job_title','organization','department','description','employment_type','job_category','logo',
-        'qualification','experience_required','total_vacancies','age_minimum','age_maximum',
-        'age_relaxation_details','salary_minimum','salary_maximum','salary_type','pay_scale',
-        'application_fee','fee_details','state','city','job_location','application_start_date',
-        'application_end_date','exam_date','admit_card_date','application_mode',
-        'official_notification_url','apply_url','selection_process','exam_pattern','syllabus',
-        'important_instructions','reservation_details','featured_job','urgent_hiring',
-        'seo_title','seo_description','seo_keywords'
+        'job_title','organization','logo','department','qualification','experience_required',
+        'total_vacancies','age_minimum','age_maximum','salary_minimum','salary_maximum','pay_scale',
+        'state','city','job_location','application_end_date','official_notification_url','apply_url',
+        'description','exam_pattern','syllabus','seo_title','seo_description'
     ];
 
     public function enrich(JobCandidate $candidate): void
