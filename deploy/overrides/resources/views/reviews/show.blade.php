@@ -40,7 +40,29 @@ body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background
 <div><label>SEO Title</label><input name="seo_title" value="<?= e($v('seo_title')) ?>"><?= $mark('seo_title') ?><?= $sourceMark('seo_title') ?></div>
 <div class="full"><label>SEO Description</label><textarea name="seo_description"><?= e($v('seo_description')) ?></textarea><?= $mark('seo_description') ?><?= $sourceMark('seo_description') ?></div>
 <div class="full"><label>SEO Keywords</label><input name="seo_keywords" value="<?= e($v('seo_keywords')) ?>"><?= $mark('seo_keywords') ?><?= $sourceMark('seo_keywords') ?></div>
-</div><button class="btn save" type="submit">Save Details</button></div></form><div class="card"><h2>Official Evidence</h2><?php $discoveredFrom=$v('discovered_from_url',$v('source_url')); ?><p><a target="_blank" rel="noopener" href="<?= e($candidate->official_source_url) ?>">Open official source page</a><?php if($candidate->notification_pdf_url): ?> · <a target="_blank" rel="noopener" href="<?= e($candidate->notification_pdf_url) ?>">Open notification PDF</a><?php endif; ?><?php if($discoveredFrom): ?> · <a target="_blank" rel="noopener" href="<?= e($discoveredFrom) ?>">Open discovered-from page</a><?php endif; ?></p><div class="evidence"><?= e($v('raw_text','')) ?></div></div><div class="card"><h2>Decision</h2><form method="post" action="/reviews/<?= (int)$candidate->id ?>"><?= csrf_field() ?><input type="hidden" name="job_title" value="<?= e($candidate->job_title) ?>"><input type="hidden" name="organization" value="<?= e($candidate->organization) ?>"><input type="hidden" name="total_vacancies" value="<?= e($candidate->total_vacancies) ?>"><input type="hidden" name="application_last_date" value="<?= e(optional($candidate->application_last_date)->format('Y-m-d')) ?>"><input type="hidden" name="application_url" value="<?= e($candidate->application_url) ?>"><textarea name="notes" placeholder="Reviewer notes"></textarea><button class="btn approve" name="action" value="approve">Approve</button> <button class="btn reject" name="action" value="reject">Reject</button></form></div></main><script>
+</div><button class="btn save" type="submit">Save Details</button></div></form>
+<?php $questionPapers=$v('previous_question_papers',[]); $questionPapers=is_array($questionPapers)?$questionPapers:[]; ?>
+<div class="card">
+<h2>Previous Year Question Papers</h2>
+<p style="color:#475569">Verified papers for the last 3 completed years. Official/archive sources are checked first; one combined Sonnet web search is allowed only for missing years.</p>
+<?php if($questionPapers): ?>
+<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+<thead><tr><th style="text-align:left;padding:10px;border-bottom:1px solid #e5e7eb">Year</th><th style="text-align:left;padding:10px;border-bottom:1px solid #e5e7eb">Paper</th><th style="text-align:left;padding:10px;border-bottom:1px solid #e5e7eb">Source</th><th style="text-align:left;padding:10px;border-bottom:1px solid #e5e7eb">PDF</th></tr></thead>
+<tbody>
+<?php foreach($questionPapers as $paper): if(!is_array($paper)) continue; ?>
+<tr>
+<td style="padding:10px;border-bottom:1px solid #f1f5f9"><strong><?= e($paper['year']??'') ?></strong></td>
+<td style="padding:10px;border-bottom:1px solid #f1f5f9"><?= e($paper['title']??'Question Paper') ?></td>
+<td style="padding:10px;border-bottom:1px solid #f1f5f9"><?php if(!empty($paper['source_url'])): ?><a target="_blank" rel="noopener" href="<?= e($paper['source_url']) ?>"><?= e($paper['source_title']??'View source') ?></a><?php else: ?>—<?php endif; ?><?php if(!empty($paper['is_official'])): ?> <small style="color:#047857;font-weight:700">Official</small><?php endif; ?></td>
+<td style="padding:10px;border-bottom:1px solid #f1f5f9"><?php if(!empty($paper['pdf_url'])): ?><a class="btn" style="display:inline-block" target="_blank" rel="noopener" href="<?= e($paper['pdf_url']) ?>">Open PDF</a><?php else: ?>—<?php endif; ?></td>
+</tr>
+<?php endforeach; ?>
+</tbody></table></div>
+<?php else: ?>
+<div class="evidence">No verified previous-year question papers were found for this job.</div>
+<?php endif; ?>
+</div>
+<div class="card"><h2>Official Evidence</h2><?php $discoveredFrom=$v('discovered_from_url',$v('source_url')); ?><p><a target="_blank" rel="noopener" href="<?= e($candidate->official_source_url) ?>">Open official source page</a><?php if($candidate->notification_pdf_url): ?> · <a target="_blank" rel="noopener" href="<?= e($candidate->notification_pdf_url) ?>">Open notification PDF</a><?php endif; ?><?php if($discoveredFrom): ?> · <a target="_blank" rel="noopener" href="<?= e($discoveredFrom) ?>">Open discovered-from page</a><?php endif; ?></p><div class="evidence"><?= e($v('raw_text','')) ?></div></div><div class="card"><h2>Decision</h2><form method="post" action="/reviews/<?= (int)$candidate->id ?>"><?= csrf_field() ?><input type="hidden" name="job_title" value="<?= e($candidate->job_title) ?>"><input type="hidden" name="organization" value="<?= e($candidate->organization) ?>"><input type="hidden" name="total_vacancies" value="<?= e($candidate->total_vacancies) ?>"><input type="hidden" name="application_last_date" value="<?= e(optional($candidate->application_last_date)->format('Y-m-d')) ?>"><input type="hidden" name="application_url" value="<?= e($candidate->application_url) ?>"><textarea name="notes" placeholder="Reviewer notes"></textarea><button class="btn approve" name="action" value="approve">Approve</button> <button class="btn reject" name="action" value="reject">Reject</button></form></div></main><script>
 (function(){
 const btn=document.getElementById('fetchAllDataBtn');
 const box=document.getElementById('fetchProgress');
