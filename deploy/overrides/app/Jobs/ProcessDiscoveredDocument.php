@@ -83,6 +83,9 @@ class ProcessDiscoveredDocument implements ShouldQueue
         $vacancies = $this->findVacancyCount($raw);
         $applyUrl = $this->findApplyUrl($raw);
         $logoUrl = $this->resolveOfficialLogo($source, $metadata, $doc);
+        $logoSourcePage = $logoUrl
+            ? (string)($metadata['discovered_from'] ?? $source->recruitment_url)
+            : null;
 
         $model = new JobCandidate();
         $columns = Schema::getColumnListing($model->getTable());
@@ -108,6 +111,7 @@ class ProcessDiscoveredDocument implements ShouldQueue
                 'application_end_date' => $lastDate,
                 'apply_url' => $applyUrl,
                 'logo' => $logoUrl,
+                'logo_source_page' => $logoSourcePage,
                 'official_notification_url' => (string)$doc->url,
                 'source_name' => $source->name,
                 'source_url' => $source->recruitment_url,
