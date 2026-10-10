@@ -253,6 +253,13 @@ class OfficialSupplementalEnricher
         if (preg_match_all('#<img\b[^>]*>#i', $html, $matches)) {
             foreach ($matches[0] as $tag) {
                 $src = $this->htmlAttribute($tag, 'src') ?: $this->htmlAttribute($tag, 'data-src');
+                if (!$src) {
+                    $srcset = $this->htmlAttribute($tag, 'srcset') ?: $this->htmlAttribute($tag, 'data-srcset');
+                    if ($srcset) {
+                        $first = trim(explode(',', $srcset)[0] ?? '');
+                        $src = trim(explode(' ', $first)[0] ?? '');
+                    }
+                }
                 if (!$src) continue;
 
                 $hint = strtolower(implode(' ', array_filter([
@@ -369,9 +376,18 @@ class OfficialSupplementalEnricher
 
     private function isOfficialAssetUrl(string $url, string $officialHost): bool
     {
-        return $this->validUrl($url)
-            && $officialHost !== ''
-            && $this->sameOfficialHost($this->hostOf($url), $officialHost);
+        if (!$this->validUrl($url)) return false;
+
+        $assetHost = $this->hostOf($url);
+        if ($officialHost !== '' && $this->sameOfficialHost($assetHost, $officialHost)) {
+            return true;
+        }
+
+        // Indian government S3WaaS sites commonly serve official logos/assets
+        // from cdn.s3waas.gov.in while the page itself is on district.gov.in.
+        // Accept only this known government CDN fallback.
+        return $assetHost === 's3waas.gov.in'
+            || str_ends_with($assetHost, '.s3waas.gov.in');
     }
 
     private function isMissing(mixed $value): bool
