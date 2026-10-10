@@ -46,10 +46,10 @@ class JobMissingDataFetcher
 
         // Read official evidence locally first, then send ALL pending fields in ONE Claude API request.
         // Claude may web-search only for fields that the official evidence cannot verify.
-        $official = $this->officialEvidence($candidate, $data);
+        $officialBundle = $this->officialEvidenceBundle($candidate, $data);
         $body = $this->callClaude(
             $apiKey,
-            $this->payload($candidate, $data, $missing, $official),
+            $this->payload($candidate, $data, $missing, $officialBundle),
             $candidate
         );
 
@@ -65,8 +65,9 @@ class JobMissingDataFetcher
             $data,
             $missing,
             $research,
-            $official !== null ? 'official_evidence_first' : 'web_search_only'
+            $officialBundle !== [] ? 'official_evidence_first' : 'web_search_only'
         );
+        $structured = $this->mergeWithVerifiedResearch($structured, $research, $missing);
 
         $references = is_array($data['field_sources'] ?? null) ? $data['field_sources'] : [];
         $pendingApproval = is_array($data['claude_pending_approval'] ?? null) ? $data['claude_pending_approval'] : [];
@@ -90,10 +91,13 @@ class JobMissingDataFetcher
             $sourceKind = (string)($row['source_kind'] ?? '');
 
             if ($sourceKind === 'official_evidence') {
-                if ($official === null) continue;
-                $sourceUrl = $official['url'];
+                if ($officialBundle === []) continue;
+                $bundleUrls = array_map(fn($item) => $this->normalizeUrl($item['url']), $officialBundle);
+                if (!$this->validUrl($sourceUrl) || !in_array($this->normalizeUrl($sourceUrl), $bundleUrls, true)) {
+                    $sourceUrl = $officialBundle[0]['url'];
+                }
                 $provider = 'claude_official_evidence';
-                $sourceTitle = $this->nullableString($row['source_title'] ?? null) ?: $official['title'];
+                $sourceTitle = $this->nullableString($row['source_title'] ?? null) ?: 'Official recruitment evidence';
             } elseif ($sourceKind === 'web_search') {
                 if (!$this->validUrl($sourceUrl)) continue;
                 if ($searchedUrls !== [] && !in_array($this->normalizeUrl($sourceUrl), $searchedUrls, true)) {
@@ -160,7 +164,7 @@ class JobMissingDataFetcher
             'fetched_count'=>count($accepted),
             'fetched_fields'=>$accepted,
             'not_found'=>$notFound,
-            'source_mode'=>$official !== null ? 'official_evidence_first' : 'web_search_only',
+            'source_mode'=>$officialBundle !== [] ? 'official_evidence_first' : 'web_search_only',
             'web_searches_used'=>$webSearchesUsed,
             'requires_admin_approval'=>count($accepted) > 0,
         ];
@@ -216,6 +220,7 @@ class JobMissingDataFetcher
             $research,
             'retry_missing_only'
         );
+        $structured = $this->mergeWithVerifiedResearch($structured, $research, $retryFields);
 
         $officialUrls = array_map(fn($item) => $this->normalizeUrl($item['url']), $officialBundle);
 
@@ -468,15 +473,17 @@ TXT;
         ], true);
     }
 
-    private function officialEvidence(JobCandidate $candidate, array $data): ?array
+    private function officialEvidenceBundle(JobCandidate $candidate, array $data): array
     {
-        foreach ([
-            ['url'=>(string)$candidate->notification_pdf_url,'kind'=>'official_notification_pdf','title'=>'Official notification / PDF'],
-            ['url'=>(string)$candidate->official_source_url,'kind'=>'official_source','title'=>'Official recruitment source'],
-        ] as $source) {
-            $url = trim($source['url']);
-            if (!$this->validUrl($url)) continue;
+        $urls = array_values(array_unique(array_filter([
+            (string)$candidate->notification_pdf_url,
+            (string)$candidate->official_source_url,
+            (string)($data['discovered_from_url'] ?? ''),
+            (string)($data['source_url'] ?? ''),
+        ], fn($url) => $this->validUrl(trim($url)))));
 
+        $items = [];
+        foreach ($urls as $url) {
             try {
                 $result = $this->httpFetcher->fetch($url);
                 $isPdf = str_contains(strtolower((string)$result->contentType), 'application/pdf')
@@ -486,16 +493,17 @@ TXT;
                     ? (string)($this->pdfTextExtractor->extract($result->body)['text'] ?? '')
                     : $this->contentNormalizer->text($result->body);
 
-                if (mb_strlen(trim($text)) >= 120) {
-                    return [
-                        'kind'=>$source['kind'],
-                        'url'=>$result->url ?: $url,
-                        'title'=>$source['title'],
-                        'text'=>mb_substr(trim($text), 0, 60000),
-                    ];
-                }
+                $text = trim($text);
+                if (mb_strlen($text) < 120) continue;
+
+                $items[] = [
+                    'kind'=>$isPdf ? 'official_notification_pdf' : 'official_source_page',
+                    'url'=>$result->url ?: $url,
+                    'title'=>$isPdf ? 'Official notification / PDF' : 'Official recruitment/source page',
+                    'text'=>mb_substr($text, 0, 45000),
+                ];
             } catch (Throwable $e) {
-                Log::warning('Official evidence read failed before Claude fetch', [
+                Log::warning('Official evidence bundle read failed', [
                     'candidate_id'=>$candidate->id,
                     'url'=>$url,
                     'error'=>$e->getMessage(),
@@ -504,20 +512,20 @@ TXT;
         }
 
         $raw = trim((string)($data['raw_text'] ?? ''));
-        $url = $this->validUrl((string)$candidate->notification_pdf_url)
-            ? (string)$candidate->notification_pdf_url
-            : (string)$candidate->official_source_url;
+        $fallbackUrl = $this->validUrl((string)$candidate->official_source_url)
+            ? (string)$candidate->official_source_url
+            : (string)$candidate->notification_pdf_url;
 
-        if (mb_strlen($raw) >= 120 && $this->validUrl($url)) {
-            return [
+        if ($items === [] && mb_strlen($raw) >= 120 && $this->validUrl($fallbackUrl)) {
+            $items[] = [
                 'kind'=>'official_source_cached',
-                'url'=>$url,
-                'title'=>'Official recruitment evidence',
-                'text'=>mb_substr($raw, 0, 60000),
+                'url'=>$fallbackUrl,
+                'title'=>'Cached official recruitment evidence',
+                'text'=>mb_substr($raw, 0, 45000),
             ];
         }
 
-        return null;
+        return $items;
     }
 
     private function context(JobCandidate $candidate, array $data): array
@@ -540,6 +548,45 @@ TXT;
             'application_last_date'=>optional($candidate->application_last_date)->format('Y-m-d'),
             'current_known_fields'=>$known,
         ];
+    }
+
+    private function mergeWithVerifiedResearch(array $filled, array $research, array $targetFields): array
+    {
+        $byField = [];
+        foreach (($filled['results'] ?? []) as $row) {
+            if (!is_array($row)) continue;
+            $field = (string)($row['field'] ?? '');
+            if ($field !== '' && in_array($field, $targetFields, true)) {
+                $byField[$field] = $row;
+            }
+        }
+
+        foreach (($research['results'] ?? []) as $row) {
+            if (!is_array($row)) continue;
+            $field = (string)($row['field'] ?? '');
+            if ($field === '' || !in_array($field, $targetFields, true) || isset($byField[$field])) continue;
+
+            $confidence = (float)($row['confidence'] ?? 0);
+            $sourceKind = (string)($row['source_kind'] ?? '');
+            $sourceUrl = trim((string)($row['source_url'] ?? ''));
+            $value = $this->normalizeValue($field, $row['value'] ?? null);
+
+            if ($confidence < 0.72 || $value === null || $value === '') continue;
+            if (!in_array($sourceKind, ['official_evidence','web_search'], true)) continue;
+            if (!$this->validUrl($sourceUrl)) continue;
+
+            $row['value'] = is_scalar($value) ? (string)$value : $value;
+            $byField[$field] = $row;
+        }
+
+        $results = array_values($byField);
+        $found = array_map(fn($row) => (string)($row['field'] ?? ''), $results);
+        $notFound = array_values(array_filter(
+            array_unique(array_merge($filled['not_found'] ?? [], $research['not_found'] ?? [])),
+            fn($field) => in_array($field, $targetFields, true) && !in_array($field, $found, true)
+        ));
+
+        return ['results'=>$results,'not_found'=>$notFound];
     }
 
     private function structuredResultTool(string $name, string $description): array
@@ -582,10 +629,13 @@ TXT;
         ];
     }
 
-    private function payload(JobCandidate $candidate, array $data, array $missing, ?array $official): array
+    private function payload(JobCandidate $candidate, array $data, array $missing, array $officialBundle): array
     {
-        $officialText = $official !== null
-            ? "OFFICIAL EVIDENCE URL:\n".$official['url']."\n\nOFFICIAL EVIDENCE TEXT:\n".$official['text']
+        $officialText = $officialBundle !== []
+            ? implode("\n\n--- OFFICIAL EVIDENCE SOURCE ---\n", array_map(
+                fn($item) => "URL: ".$item['url']."\nTITLE: ".$item['title']."\nTEXT:\n".$item['text'],
+                $officialBundle
+            ))
             : "OFFICIAL EVIDENCE: unavailable or unreadable.";
 
         $system = <<<'TXT'
