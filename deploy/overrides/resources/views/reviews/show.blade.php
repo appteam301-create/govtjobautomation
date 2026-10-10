@@ -28,7 +28,7 @@ body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background
 <?php $questionPapers=$v('previous_question_papers',[]); $questionPapers=is_array($questionPapers)?$questionPapers:[]; ?>
 <div class="card">
 <h2>Previous Year Question Papers</h2>
-<p style="color:#475569">Verified papers for the last 3 completed years. Official/archive sources are checked first; one combined Sonnet web search is allowed only for missing years.</p>
+<p style="color:#475569">Verified question-paper PDFs or official paper pages for the last 3 completed years. Official/archive sources are checked first; one combined Sonnet web search is allowed only for missing years.</p>
 <?php if($questionPapers): ?>
 <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
 <thead><tr><th style="text-align:left;padding:10px;border-bottom:1px solid #e5e7eb">Year</th><th style="text-align:left;padding:10px;border-bottom:1px solid #e5e7eb">Paper</th><th style="text-align:left;padding:10px;border-bottom:1px solid #e5e7eb">Source</th><th style="text-align:left;padding:10px;border-bottom:1px solid #e5e7eb">PDF</th></tr></thead>
@@ -38,7 +38,7 @@ body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background
 <td style="padding:10px;border-bottom:1px solid #f1f5f9"><strong><?= e($paper['year']??'') ?></strong></td>
 <td style="padding:10px;border-bottom:1px solid #f1f5f9"><?= e($paper['title']??'Question Paper') ?></td>
 <td style="padding:10px;border-bottom:1px solid #f1f5f9"><?php if(!empty($paper['source_url'])): ?><a target="_blank" rel="noopener" href="<?= e($paper['source_url']) ?>"><?= e($paper['source_title']??'View source') ?></a><?php else: ?>—<?php endif; ?><?php if(!empty($paper['is_official'])): ?> <small style="color:#047857;font-weight:700">Official</small><?php endif; ?></td>
-<td style="padding:10px;border-bottom:1px solid #f1f5f9"><?php if(!empty($paper['pdf_url'])): ?><a class="btn" style="display:inline-block" target="_blank" rel="noopener" href="<?= e($paper['pdf_url']) ?>">Open PDF</a><?php else: ?>—<?php endif; ?></td>
+<td style="padding:10px;border-bottom:1px solid #f1f5f9"><?php $paperLink=$paper['paper_url']??$paper['pdf_url']??null; if($paperLink): ?><a class="btn" style="display:inline-block" target="_blank" rel="noopener" href="<?= e($paperLink) ?>">Open Paper</a><?php else: ?>—<?php endif; ?></td>
 </tr>
 <?php endforeach; ?>
 </tbody></table></div>
