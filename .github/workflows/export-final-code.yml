@@ -1,0 +1,23 @@
+name: Export Final Code ZIP
+on:
+  push:
+    branches: [main]
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sanitize env example and package
+        run: |
+          if [ -f .env.example ]; then
+            sed -i 's/^CLAUDE_API_KEY=.*/CLAUDE_API_KEY=your_claude_api_key_here/' .env.example
+          fi
+          rm -f LatestGovtJobs-Automation-Final.zip
+          zip -r LatestGovtJobs-Automation-Final.zip . \
+            -x ".git/*" \
+            -x ".github/workflows/export-final-code.yml" \
+            -x "LatestGovtJobs-Automation-Final.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LatestGovtJobs-Automation-Final
+          path: LatestGovtJobs-Automation-Final.zip
