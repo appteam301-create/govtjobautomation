@@ -5,41 +5,25 @@ body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background
 <div><label>Organization *</label><input name="organization" value="<?= e($v('organization',$candidate->organization)) ?>"><?= $mark('organization') ?><?= $sourceMark('organization') ?></div>
 <div class="full"><label>Logo</label><input type="url" name="logo" value="<?= e($v('logo')) ?>" placeholder="Official website logo URL"><?php if($v('logo')): ?><div style="display:flex;align-items:center;gap:12px;margin-top:8px"><img src="<?= e($v('logo')) ?>" alt="Official source logo" style="max-width:120px;max-height:72px;object-fit:contain;border:1px solid #e5e7eb;border-radius:8px;padding:6px;background:#fff" onerror="this.style.display='none'"><?php if($v('logo_source_page')): ?><a target="_blank" rel="noopener" href="<?= e($v('logo_source_page')) ?>">Logo source page</a><?php endif; ?></div><?php endif; ?><?= $mark('logo') ?></div>
 <div><label>Department</label><input name="department" value="<?= e($v('department')) ?>"><?= $mark('department') ?><?= $sourceMark('department') ?></div>
-<div><label>Employment Type</label><input name="employment_type" value="<?= e($v('employment_type')) ?>"><?= $mark('employment_type') ?><?= $sourceMark('employment_type') ?></div>
-<div><label>Job Category</label><input name="job_category" value="<?= e($v('job_category')) ?>"><?= $mark('job_category') ?><?= $sourceMark('job_category') ?></div>
-<div><label>Qualification</label><textarea name="qualification"><?= e($v('qualification')) ?></textarea><?= $mark('qualification') ?><?= $sourceMark('qualification') ?></div>
-<div><label>Experience Required</label><textarea name="experience_required"><?= e($v('experience_required')) ?></textarea><?= $mark('experience_required') ?><?= $sourceMark('experience_required') ?></div>
+<div class="full"><label>Qualification</label><textarea name="qualification"><?= e($v('qualification')) ?></textarea><?= $mark('qualification') ?><?= $sourceMark('qualification') ?></div>
+<div class="full"><label>Experience Required</label><textarea name="experience_required"><?= e($v('experience_required')) ?></textarea><?= $mark('experience_required') ?><?= $sourceMark('experience_required') ?></div>
 <div><label>Total Vacancies</label><input type="number" name="total_vacancies" value="<?= e($v('total_vacancies',$candidate->total_vacancies)) ?>"><?= $mark('total_vacancies') ?><?= $sourceMark('total_vacancies') ?></div>
 <div><label>Age Minimum</label><input type="number" name="age_minimum" value="<?= e($v('age_minimum')) ?>"><?= $mark('age_minimum') ?><?= $sourceMark('age_minimum') ?></div>
 <div><label>Age Maximum</label><input type="number" name="age_maximum" value="<?= e($v('age_maximum')) ?>"><?= $mark('age_maximum') ?><?= $sourceMark('age_maximum') ?></div>
-<div class="full"><label>Age Relaxation Details</label><textarea name="age_relaxation_details"><?= e($v('age_relaxation_details')) ?></textarea><?= $mark('age_relaxation_details') ?><?= $sourceMark('age_relaxation_details') ?></div>
 <div><label>Salary Minimum</label><input type="number" name="salary_minimum" value="<?= e($v('salary_minimum')) ?>"><?= $mark('salary_minimum') ?><?= $sourceMark('salary_minimum') ?></div>
 <div><label>Salary Maximum</label><input type="number" name="salary_maximum" value="<?= e($v('salary_maximum')) ?>"><?= $mark('salary_maximum') ?><?= $sourceMark('salary_maximum') ?></div>
-<div><label>Salary Type</label><input name="salary_type" value="<?= e($v('salary_type')) ?>"><?= $mark('salary_type') ?><?= $sourceMark('salary_type') ?></div>
 <div><label>Pay Scale</label><input name="pay_scale" value="<?= e($v('pay_scale')) ?>"><?= $mark('pay_scale') ?><?= $sourceMark('pay_scale') ?></div>
-<div><label>Application Fee</label><input type="number" name="application_fee" value="<?= e($v('application_fee')) ?>"><?= $mark('application_fee') ?><?= $sourceMark('application_fee') ?></div>
-<div><label>Fee Details</label><textarea name="fee_details"><?= e($v('fee_details')) ?></textarea><?= $mark('fee_details') ?><?= $sourceMark('fee_details') ?></div>
 <div><label>State</label><input name="state" value="<?= e($v('state')) ?>"><?= $mark('state') ?><?= $sourceMark('state') ?></div>
 <div><label>City</label><input name="city" value="<?= e($v('city')) ?>"><?= $mark('city') ?><?= $sourceMark('city') ?></div>
 <div class="full"><label>Job Location</label><input name="job_location" value="<?= e($v('job_location')) ?>"><?= $mark('job_location') ?><?= $sourceMark('job_location') ?></div>
-<div><label>Application Start Date</label><input type="date" name="application_start_date" value="<?= e($v('application_start_date')) ?>"><?= $mark('application_start_date') ?><?= $sourceMark('application_start_date') ?></div>
 <div><label>Application End Date</label><input type="date" name="application_end_date" value="<?= e($v('application_end_date',optional($candidate->application_last_date)->format('Y-m-d'))) ?>"><?= $mark('application_end_date') ?><?= $sourceMark('application_end_date') ?></div>
-<div><label>Exam Date</label><input type="date" name="exam_date" value="<?= e($v('exam_date')) ?>"><?= $mark('exam_date') ?><?= $sourceMark('exam_date') ?></div>
-<div><label>Admit Card Date</label><input type="date" name="admit_card_date" value="<?= e($v('admit_card_date')) ?>"><?= $mark('admit_card_date') ?><?= $sourceMark('admit_card_date') ?></div>
-<div><label>Application Mode</label><input name="application_mode" value="<?= e($v('application_mode')) ?>"><?= $mark('application_mode') ?><?= $sourceMark('application_mode') ?></div>
-<div><label>Official Notification URL</label><input name="official_notification_url" value="<?= e($v('official_notification_url',$candidate->notification_pdf_url ?: $candidate->official_source_url)) ?>"><?= $mark('official_notification_url') ?><?= $sourceMark('official_notification_url') ?></div>
+<div class="full"><label>Official Notification URL</label><input name="official_notification_url" value="<?= e($v('official_notification_url',$candidate->notification_pdf_url ?: $candidate->official_source_url)) ?>"><?= $mark('official_notification_url') ?><?= $sourceMark('official_notification_url') ?></div>
 <div class="full"><label>Apply URL</label><input name="apply_url" value="<?= e($v('apply_url',$candidate->application_url)) ?>"><?= $mark('apply_url') ?><?= $sourceMark('apply_url') ?></div>
 <div class="full"><label>Description</label><textarea name="description"><?= e($v('description')) ?></textarea><?= $mark('description') ?><?= $sourceMark('description') ?></div>
-<div class="full"><label>Selection Process</label><textarea name="selection_process"><?= e($v('selection_process')) ?></textarea><?= $mark('selection_process') ?><?= $sourceMark('selection_process') ?></div>
 <div class="full"><label>Exam Pattern</label><textarea name="exam_pattern"><?= e($v('exam_pattern')) ?></textarea><?= $mark('exam_pattern') ?><?= $sourceMark('exam_pattern') ?></div>
 <div class="full"><label>Syllabus</label><textarea name="syllabus"><?= e($v('syllabus')) ?></textarea><?= $mark('syllabus') ?><?= $sourceMark('syllabus') ?></div>
-<div class="full"><label>Important Instructions</label><textarea name="important_instructions"><?= e($v('important_instructions')) ?></textarea><?= $mark('important_instructions') ?><?= $sourceMark('important_instructions') ?></div>
-<div class="full"><label>Reservation Details</label><textarea name="reservation_details"><?= e($v('reservation_details')) ?></textarea><?= $mark('reservation_details') ?><?= $sourceMark('reservation_details') ?></div>
-<div><label><input style="width:auto" type="checkbox" name="featured_job" value="1" <?= $v('featured_job')?'checked':'' ?>> Featured Job</label></div>
-<div><label><input style="width:auto" type="checkbox" name="urgent_hiring" value="1" <?= $v('urgent_hiring')?'checked':'' ?>> Urgent Hiring</label></div>
 <div><label>SEO Title</label><input name="seo_title" value="<?= e($v('seo_title')) ?>"><?= $mark('seo_title') ?><?= $sourceMark('seo_title') ?></div>
 <div class="full"><label>SEO Description</label><textarea name="seo_description"><?= e($v('seo_description')) ?></textarea><?= $mark('seo_description') ?><?= $sourceMark('seo_description') ?></div>
-<div class="full"><label>SEO Keywords</label><input name="seo_keywords" value="<?= e($v('seo_keywords')) ?>"><?= $mark('seo_keywords') ?><?= $sourceMark('seo_keywords') ?></div>
 </div><button class="btn save" type="submit">Save Details</button></div></form>
 <?php $questionPapers=$v('previous_question_papers',[]); $questionPapers=is_array($questionPapers)?$questionPapers:[]; ?>
 <div class="card">
