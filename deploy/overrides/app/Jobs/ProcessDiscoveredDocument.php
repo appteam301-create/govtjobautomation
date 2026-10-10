@@ -5,6 +5,7 @@ use App\Models\DiscoveredDocument;
 use App\Models\GovernmentSource;
 use App\Models\JobCandidate;
 use App\Services\Extraction\JobDetailsEnricher;
+use App\Services\Extraction\PreviousQuestionPaperFinder;
 use Carbon\Carbon;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -21,7 +22,7 @@ class ProcessDiscoveredDocument implements ShouldQueue
 
     public function __construct(public int $documentId) {}
 
-    public function handle(JobDetailsEnricher $enricher): void
+    public function handle(JobDetailsEnricher $enricher, PreviousQuestionPaperFinder $questionPapers): void
     {
         if (is_file('/data/crawl-reset.flag')) return;
 
@@ -137,6 +138,14 @@ class ProcessDiscoveredDocument implements ShouldQueue
         $candidate->save();
 
         $enricher->enrich($candidate);
+
+        // Question-paper discovery is additive and isolated from the core job-fetch flow.
+        // It scans known official pages first and uses at most one Sonnet web search for missing years.
+        try {
+            $questionPapers->findAndStore($candidate->fresh(), $source, $doc, $metadata);
+        } catch (Throwable $e) {
+            // Never fail or roll back a valid discovered job because paper discovery failed.
+        }
     }
 
     private function extractText(string $url, string $type, string $fallback): string
