@@ -19,12 +19,23 @@ class OfficialSupplementalEnricher
         $metadata = $document && is_array($document->metadata) ? $document->metadata : [];
 
         $changed = [];
+        $references = is_array($data['field_sources'] ?? null) ? $data['field_sources'] : [];
 
         if ($this->isMissing($data['logo'] ?? null)) {
             $logo = $this->resolveLogo($candidate, $source, $metadata);
             if ($logo !== null) {
                 $data['logo'] = $logo['url'];
                 $data['logo_source_page'] = $logo['source_page'];
+                if (!empty($logo['storage_path'])) $data['logo_storage_path'] = $logo['storage_path'];
+                $references['logo'] = [
+                    'provider'=>'official_source_backfill',
+                    'source_url'=>$logo['source_page'],
+                    'source_title'=>'Official website logo',
+                    'reference'=>'Logo extracted from the official discovered/source website.',
+                    'confidence'=>1.0,
+                    'needs_admin_approval'=>false,
+                    'fetched_at'=>now()->toIso8601String(),
+                ];
                 $changed[] = 'logo';
             }
         }
@@ -34,10 +45,20 @@ class OfficialSupplementalEnricher
             if ($applyUrl) {
                 $data['apply_url'] = $applyUrl;
                 $candidate->application_url = $applyUrl;
+                $references['apply_url'] = [
+                    'provider'=>'official_source_backfill',
+                    'source_url'=>(string)($data['discovered_from_url'] ?? $source?->recruitment_url ?? $candidate->official_source_url),
+                    'source_title'=>'Official discovered job page',
+                    'reference'=>'Exact job detail/apply page matched from the official recruitment listing.',
+                    'confidence'=>1.0,
+                    'needs_admin_approval'=>false,
+                    'fetched_at'=>now()->toIso8601String(),
+                ];
                 $changed[] = 'apply_url';
             }
         }
 
+        $data['field_sources'] = $references;
         $candidate->extracted_data = $data;
 
         $columns = Schema::getColumnListing($candidate->getTable());
@@ -64,6 +85,7 @@ class OfficialSupplementalEnricher
             return [
                 'url'=>$cached,
                 'source_page'=>(string)($settings['official_logo_source_page'] ?? ($data['discovered_from_url'] ?? $source?->recruitment_url)),
+                'storage_path'=>$this->cacheLogoLocally($cached),
             ];
         }
 
@@ -99,7 +121,11 @@ class OfficialSupplementalEnricher
                     $source->save();
                 }
 
-                return ['url'=>$logo,'source_page'=>$pageUrl];
+                return [
+                    'url'=>$logo,
+                    'source_page'=>$pageUrl,
+                    'storage_path'=>$this->cacheLogoLocally($logo),
+                ];
             } catch (Throwable $e) {
                 continue;
             }
@@ -179,6 +205,42 @@ class OfficialSupplementalEnricher
             }
 
             return $bestScore >= 25 ? $best : null;
+        } catch (Throwable $e) {
+            return null;
+        }
+    }
+
+    private function cacheLogoLocally(string $url): ?string
+    {
+        if (!$this->validUrl($url)) return null;
+
+        try {
+            $response = Http::withHeaders([
+                'User-Agent'=>config('govjobs.crawler.user_agent'),
+                'Accept'=>'image/*,*/*;q=0.5',
+            ])->timeout(10)->get($url);
+
+            if (!$response->successful()) return null;
+
+            $contentType = strtolower((string)$response->header('Content-Type'));
+            if (!str_starts_with($contentType, 'image/')) return null;
+
+            $ext = match (true) {
+                str_contains($contentType, 'png') => 'png',
+                str_contains($contentType, 'svg') => 'svg',
+                str_contains($contentType, 'webp') => 'webp',
+                str_contains($contentType, 'gif') => 'gif',
+                default => 'jpg',
+            };
+
+            $dir = '/data/job-logos';
+            if (!is_dir($dir)) @mkdir($dir, 0775, true);
+            if (!is_dir($dir)) return null;
+
+            $path = $dir.'/'.hash('sha256', $url).'.'.$ext;
+            if (!is_file($path)) file_put_contents($path, $response->body());
+
+            return is_file($path) ? $path : null;
         } catch (Throwable $e) {
             return null;
         }
