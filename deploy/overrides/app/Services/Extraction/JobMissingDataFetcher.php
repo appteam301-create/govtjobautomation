@@ -44,8 +44,9 @@ class JobMissingDataFetcher
             ];
         }
 
-        // Read official evidence locally first, then send ALL pending fields in ONE Claude API request.
-        // Claude may web-search only for fields that the official evidence cannot verify.
+        // Strict flow: PDF first -> official source page fallback.
+        // If official evidence is usable, Sonnet gets NO web-search tool.
+        // Web search (max 2) is exposed only when official evidence is unavailable/unreadable.
         $officialBundle = $this->officialEvidenceBundle($candidate, $data);
         $body = $this->callClaude(
             $apiKey,
@@ -138,7 +139,9 @@ class JobMissingDataFetcher
                 'source_url'=>null,
                 'source_title'=>'Source unavailable',
                 'source_page'=>null,
-                'reference'=>'Reliable information could not be verified from the official evidence or permitted web searches.',
+                'reference'=>$officialBundle !== []
+                    ? 'Reliable information could not be verified from the official evidence.'
+                    : 'Reliable information could not be verified from the permitted web searches.',
                 'confidence'=>null,
                 'needs_admin_approval'=>false,
                 'checked_at'=>now()->toIso8601String(),
@@ -475,57 +478,75 @@ TXT;
 
     private function officialEvidenceBundle(JobCandidate $candidate, array $data): array
     {
-        $urls = array_values(array_unique(array_filter([
-            (string)$candidate->notification_pdf_url,
-            (string)$candidate->official_source_url,
-            (string)($data['discovered_from_url'] ?? ''),
-            (string)($data['source_url'] ?? ''),
-        ], fn($url) => $this->validUrl(trim($url)))));
+        // STRICT PRIORITY:
+        // 1) Read official notification/PDF first.
+        // 2) Only if PDF is absent/unreadable, read the official source page.
+        // 3) If either source is usable, Fetch All Data will NOT expose web search to Sonnet.
 
-        $items = [];
-        foreach ($urls as $url) {
+        $pdfUrl = trim((string)$candidate->notification_pdf_url);
+        if ($this->validUrl($pdfUrl)) {
             try {
-                $result = $this->httpFetcher->fetch($url);
+                $result = $this->httpFetcher->fetch($pdfUrl);
                 $isPdf = str_contains(strtolower((string)$result->contentType), 'application/pdf')
                     || str_ends_with(strtolower((string)(parse_url($result->url, PHP_URL_PATH) ?: '')), '.pdf');
 
-                $text = $isPdf
-                    ? (string)($this->pdfTextExtractor->extract($result->body)['text'] ?? '')
-                    : $this->contentNormalizer->text($result->body);
-
-                $text = trim($text);
-                if (mb_strlen($text) < 120) continue;
-
-                $items[] = [
-                    'kind'=>$isPdf ? 'official_notification_pdf' : 'official_source_page',
-                    'url'=>$result->url ?: $url,
-                    'title'=>$isPdf ? 'Official notification / PDF' : 'Official recruitment/source page',
-                    'text'=>mb_substr($text, 0, 45000),
-                ];
+                if ($isPdf) {
+                    $text = trim((string)($this->pdfTextExtractor->extract($result->body)['text'] ?? ''));
+                    if (mb_strlen($text) >= 120) {
+                        return [[
+                            'kind'=>'official_notification_pdf',
+                            'url'=>$result->url ?: $pdfUrl,
+                            'title'=>'Official notification / PDF',
+                            'text'=>mb_substr($text, 0, 60000),
+                        ]];
+                    }
+                }
             } catch (Throwable $e) {
-                Log::warning('Official evidence bundle read failed', [
+                Log::warning('Official notification PDF read failed', [
                     'candidate_id'=>$candidate->id,
-                    'url'=>$url,
+                    'url'=>$pdfUrl,
                     'error'=>$e->getMessage(),
                 ]);
             }
         }
 
-        $raw = trim((string)($data['raw_text'] ?? ''));
-        $fallbackUrl = $this->validUrl((string)$candidate->official_source_url)
-            ? (string)$candidate->official_source_url
-            : (string)$candidate->notification_pdf_url;
+        $sourceUrl = trim((string)$candidate->official_source_url);
+        if ($this->validUrl($sourceUrl)) {
+            try {
+                $result = $this->httpFetcher->fetch($sourceUrl);
+                $text = trim($this->contentNormalizer->text($result->body));
+                if (mb_strlen($text) >= 120) {
+                    return [[
+                        'kind'=>'official_source_page',
+                        'url'=>$result->url ?: $sourceUrl,
+                        'title'=>'Official recruitment source page',
+                        'text'=>mb_substr($text, 0, 60000),
+                    ]];
+                }
+            } catch (Throwable $e) {
+                Log::warning('Official source page read failed', [
+                    'candidate_id'=>$candidate->id,
+                    'url'=>$sourceUrl,
+                    'error'=>$e->getMessage(),
+                ]);
+            }
+        }
 
-        if ($items === [] && mb_strlen($raw) >= 120 && $this->validUrl($fallbackUrl)) {
-            $items[] = [
+        // Cached raw text is accepted only as a last official-evidence fallback when
+        // it is tied to an official URL. It still counts as official evidence, so
+        // Fetch All Data will not web-search in this branch.
+        $raw = trim((string)($data['raw_text'] ?? ''));
+        $fallbackUrl = $this->validUrl($sourceUrl) ? $sourceUrl : $pdfUrl;
+        if (mb_strlen($raw) >= 120 && $this->validUrl($fallbackUrl)) {
+            return [[
                 'kind'=>'official_source_cached',
                 'url'=>$fallbackUrl,
                 'title'=>'Cached official recruitment evidence',
-                'text'=>mb_substr($raw, 0, 45000),
-            ];
+                'text'=>mb_substr($raw, 0, 60000),
+            ]];
         }
 
-        return $items;
+        return [];
     }
 
     private function context(JobCandidate $candidate, array $data): array
@@ -627,28 +648,65 @@ TXT;
 
     private function payload(JobCandidate $candidate, array $data, array $missing, array $officialBundle): array
     {
-        $officialText = $officialBundle !== []
-            ? implode("\n\n--- OFFICIAL EVIDENCE SOURCE ---\n", array_map(
-                fn($item) => "URL: ".$item['url']."\nTITLE: ".$item['title']."\nTEXT:\n".$item['text'],
-                $officialBundle
-            ))
+        $hasOfficialEvidence = $officialBundle !== [];
+
+        $officialText = $hasOfficialEvidence
+            ? "OFFICIAL EVIDENCE URL:\n".$officialBundle[0]['url']
+                ."\nTITLE: ".$officialBundle[0]['title']
+                ."\n\nOFFICIAL EVIDENCE TEXT:\n".$officialBundle[0]['text']
             : "OFFICIAL EVIDENCE: unavailable or unreadable.";
 
-        $system = <<<'TXT'
+        $system = $hasOfficialEvidence
+            ? <<<'TXT'
 You extract Indian government recruitment facts for an admin review system.
 
-STRICT RULES:
-1. Fill ALL requested missing fields together in this single request. Never make one API workflow per field.
-2. Use the provided official notification/PDF or official recruitment source FIRST.
-3. For any field that cannot be verified from the official evidence, you MAY use web search. Do not search if the official evidence already supports the field.
-4. Group unresolved fields into as few searches as possible. Never exceed the web-search tool's configured max_uses.
-5. Never overwrite or propose changes to existing non-empty values.
-6. Never guess, infer from convention, or invent values. If a value cannot be verified, put the field in not_found.
-7. Every result must include its source. Set source_kind to "official_evidence" when supported by the supplied official evidence, or "web_search" when supported by a web result.
-8. For web_search results, source_url must be the actual supporting URL returned by web search.
+STRICT OFFICIAL-EVIDENCE MODE:
+1. Fill ALL requested missing fields together in this single request.
+2. Use ONLY the supplied official notification/PDF or official source-page evidence.
+3. Web search is NOT available in this mode and must not be requested or assumed.
+4. Fill ONLY requested missing fields. Never overwrite or propose changes to existing non-empty values.
+5. Never guess, infer from convention, or invent values.
+6. If a requested field is not explicitly verifiable from the supplied official evidence, put it in not_found.
+7. Every result must use source_kind "official_evidence" and the supplied official source URL.
+8. Dates must be YYYY-MM-DD. Numeric fields must contain only the numeric value.
+9. Call submit_job_research EXACTLY ONCE with the complete structured result. Do not return final prose or markdown.
+TXT
+            : <<<'TXT'
+You extract Indian government recruitment facts for an admin review system.
+
+STRICT WEB-SEARCH MODE:
+1. No readable official notification/PDF or official source page was available.
+2. Fill ALL requested missing fields together in this single request.
+3. Use Claude web search to find reliable information. Prefer official government/recruitment sources.
+4. Group all missing fields into as few searches as possible. Never exceed the configured maximum of 2 web searches.
+5. Fill ONLY requested missing fields. Never overwrite or propose changes to existing non-empty values.
+6. Never guess, infer from convention, or invent values.
+7. If a requested field cannot be reliably verified, put it in not_found.
+8. Every result must use source_kind "web_search" and an actual supporting source URL returned by search.
 9. Dates must be YYYY-MM-DD. Numeric fields must contain only the numeric value.
-10. After research is complete, call the submit_job_research tool EXACTLY ONCE with the complete structured result. Do not return the final result as prose or markdown.
+10. Call submit_job_research EXACTLY ONCE with the complete structured result. Do not return final prose or markdown.
 TXT;
+
+        $tools = [];
+        if (!$hasOfficialEvidence) {
+            $tools[] = [
+                'type'=>'web_search_20250305',
+                'name'=>'web_search',
+                'max_uses'=>2,
+                'user_location'=>[
+                    'type'=>'approximate',
+                    'country'=>'IN',
+                    'timezone'=>'Asia/Kolkata',
+                ],
+            ];
+        }
+
+        $tools[] = $this->structuredResultTool(
+            'submit_job_research',
+            $hasOfficialEvidence
+                ? 'Submit verified results extracted only from the supplied official evidence.'
+                : 'Submit verified results found through the permitted web searches.'
+        );
 
         return [
             'model'=>config('services.claude.research_model','claude-sonnet-5-5'),
@@ -661,22 +719,7 @@ TXT;
                     ."\n\nPENDING FIELDS TO FILL:\n".implode(', ', $missing)
                     ."\n\n".$officialText,
             ]],
-            'tools'=>[
-                [
-                    'type'=>'web_search_20250305',
-                    'name'=>'web_search',
-                    'max_uses'=>2,
-                    'user_location'=>[
-                        'type'=>'approximate',
-                        'country'=>'IN',
-                        'timezone'=>'Asia/Kolkata',
-                    ],
-                ],
-                $this->structuredResultTool(
-                    'submit_job_research',
-                    'Submit the final verified research for all requested missing job fields.'
-                ),
-            ],
+            'tools'=>$tools,
         ];
     }
 
