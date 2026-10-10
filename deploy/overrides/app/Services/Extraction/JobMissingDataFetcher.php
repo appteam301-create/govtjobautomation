@@ -69,7 +69,7 @@ class JobMissingDataFetcher
             if ($unresolved !== []) {
                 $searchBody = $this->callClaude(
                     $apiKey,
-                    $this->webSearchPayload($candidate, $data, $unresolved),
+                    $this->webSearchPayload($candidate, $data, $unresolved, $officialResearch, $officialBundle),
                     $candidate
                 );
                 $searchResearch = $this->structuredOutput($searchBody, 'submit_job_research', $candidate);
@@ -83,7 +83,7 @@ class JobMissingDataFetcher
         } else {
             $searchBody = $this->callClaude(
                 $apiKey,
-                $this->webSearchPayload($candidate, $data, $missing),
+                $this->webSearchPayload($candidate, $data, $missing, [], []),
                 $candidate
             );
             $research = $this->structuredOutput($searchBody, 'submit_job_research', $candidate);
@@ -781,22 +781,104 @@ TXT;
         return ['results'=>array_values($resultsByField), 'not_found'=>$notFound];
     }
 
-    private function webSearchPayload(JobCandidate $candidate, array $data, array $missing): array
-    {
+    private function webSearchPayload(
+        JobCandidate $candidate,
+        array $data,
+        array $missing,
+        array $officialResearch = [],
+        array $officialBundle = []
+    ): array {
+        $officialFacts = [];
+        foreach (($officialResearch['results'] ?? []) as $row) {
+            if (!is_array($row)) continue;
+            $field = (string)($row['field'] ?? '');
+            $value = $row['value'] ?? null;
+            if ($field !== '' && $value !== null && $value !== '') {
+                $officialFacts[$field] = $value;
+            }
+        }
+
+        $evidenceUrls = array_values(array_unique(array_filter([
+            (string)$candidate->notification_pdf_url,
+            (string)$candidate->official_source_url,
+            (string)($data['discovered_from_url'] ?? ''),
+            (string)($data['source_url'] ?? ''),
+            ...array_map(fn($item) => (string)($item['url'] ?? ''), $officialBundle),
+        ], fn($url) => $this->validUrl(trim($url)))));
+
+        $officialDomain = '';
+        foreach ([
+            (string)$candidate->official_source_url,
+            (string)$candidate->notification_pdf_url,
+            (string)($data['discovered_from_url'] ?? ''),
+        ] as $url) {
+            if (!$this->validUrl($url)) continue;
+            $host = (string)parse_url($url, PHP_URL_HOST);
+            if ($host !== '') {
+                $officialDomain = $host;
+                break;
+            }
+        }
+
+        $coreFields = array_values(array_intersect($missing, [
+            'qualification','experience_required','total_vacancies',
+            'age_minimum','age_maximum','age_relaxation_details',
+            'salary_minimum','salary_maximum','salary_type','pay_scale',
+            'application_fee','fee_details','application_mode',
+            'application_start_date','application_end_date',
+            'selection_process','job_location','state','city',
+            'employment_type','job_category'
+        ]));
+
+        $secondaryFields = array_values(array_diff($missing, $coreFields));
+
         $system = <<<'TXT'
 You extract Indian government recruitment facts for an admin review system.
 
-WEB-SEARCH FALLBACK MODE:
-1. These fields remain unresolved after official notification/source evidence was checked.
-2. Search ONLY for the listed unresolved fields.
-3. Use Claude web search and prefer official government/recruitment sources.
-4. Group all unresolved fields into as few searches as possible. Never exceed the configured maximum of 2 web searches.
-5. Never overwrite or propose changes to existing non-empty values.
-6. Never guess or invent values. If a field cannot be reliably verified, put it in not_found.
-7. Every returned field must have source_kind "web_search" and an actual supporting source URL.
+TARGETED WEB-SEARCH FALLBACK MODE:
+
+The official notification/source has already been checked. Search ONLY for the unresolved fields listed by the user.
+
+SEARCH STRATEGY — HARD MAXIMUM 2 WEB SEARCHES TOTAL:
+
+SEARCH 1 — CORE RECRUITMENT FACTS
+- Build one precise query using the exact job title, organization, official domain, and notification/source identity.
+- Search primarily for core facts: qualification, experience, vacancies, age, salary/pay scale, application fee, application mode, dates, employment type, location, and selection process.
+- Prefer the exact official government domain, official notification, official recruitment page, official corrigendum, or official detailed advertisement.
+- Extract as many unresolved fields as possible from the results before considering another search.
+
+SEARCH 2 — ONLY IF NEEDED
+- After Search 1, identify which requested fields are STILL unresolved.
+- Run ONE second targeted query containing only those still-unresolved fields plus the exact job title/organization.
+- Do not repeat Search 1.
+- Do not search fields already verified by official evidence or Search 1.
+
+STRICT RULES:
+1. Never exceed 2 web-search uses.
+2. Never search one field at a time.
+3. Never overwrite or propose changes to existing non-empty values.
+4. Never guess or invent values.
+5. Prefer official government/recruitment sources. Use non-official sources only when necessary and when the fact can be reliably verified.
+6. Every returned field must have source_kind "web_search" and an actual supporting source URL.
+7. If a requested field cannot be reliably verified after the permitted searches, put it in not_found.
 8. Dates must be YYYY-MM-DD. Numeric fields must contain only the numeric value.
-9. Call submit_job_research EXACTLY ONCE with the complete structured result.
+9. Call submit_job_research EXACTLY ONCE with the complete structured result after all permitted research is finished.
 TXT;
+
+        $searchContext = [
+            'job_title'=>$candidate->job_title,
+            'organization'=>$candidate->organization,
+            'official_domain'=>$officialDomain ?: null,
+            'notification_pdf_url'=>$candidate->notification_pdf_url,
+            'official_source_url'=>$candidate->official_source_url,
+            'discovered_from_url'=>$data['discovered_from_url'] ?? null,
+            'application_url'=>$candidate->application_url,
+            'already_verified_official_facts'=>$officialFacts,
+            'unresolved_core_fields'=>$coreFields,
+            'other_unresolved_fields'=>$secondaryFields,
+            'all_unresolved_fields'=>$missing,
+            'known_evidence_urls'=>$evidenceUrls,
+        ];
 
         return [
             'model'=>config('services.claude.research_model','claude-sonnet-5-5'),
@@ -804,9 +886,11 @@ TXT;
             'system'=>$system,
             'messages'=>[[
                 'role'=>'user',
-                'content'=>"Job context:\n"
-                    .json_encode($this->context($candidate,$data), JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)
-                    ."\n\nUNRESOLVED FIELDS TO SEARCH:\n".implode(', ', $missing),
+                'content'=>"SEARCH CONTEXT:\n"
+                    .json_encode($searchContext, JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)
+                    ."\n\nIMPORTANT: Search 1 must use the exact job title + organization"
+                    .($officialDomain !== '' ? " + official domain {$officialDomain}" : "")
+                    .". Search 2 is allowed only for fields still unresolved after Search 1.",
             ]],
             'tools'=>[
                 [
@@ -821,7 +905,7 @@ TXT;
                 ],
                 $this->structuredResultTool(
                     'submit_job_research',
-                    'Submit the final verified web-search results for the unresolved job fields.'
+                    'Submit final verified web-search results for the unresolved job fields.'
                 ),
             ],
         ];
