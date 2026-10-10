@@ -141,23 +141,11 @@ class OfficialSupplementalEnricher
         array $metadata
     ): ?string {
         $data = is_array($candidate->extracted_data) ? $candidate->extracted_data : [];
-        $discoveredFrom = (string)($data['discovered_from_url'] ?? $metadata['discovered_from'] ?? $source?->recruitment_url ?? '');
 
-        $officialSource = trim((string)$candidate->official_source_url);
-        if ($this->validUrl($officialSource)
-            && $this->isHtmlLikeUrl($officialSource)
-            && ($discoveredFrom === '' || $this->normalizeUrl($officialSource) !== $this->normalizeUrl($discoveredFrom))
-        ) {
-            return $officialSource;
-        }
-
-        if ($document && $this->validUrl((string)$document->url)
-            && $this->isHtmlLikeUrl((string)$document->url)
-            && ($discoveredFrom === '' || $this->normalizeUrl((string)$document->url) !== $this->normalizeUrl($discoveredFrom))
-        ) {
-            return (string)$document->url;
-        }
-
+        // STRICT RULE:
+        // Apply URL must come only from the Open discovered-from page.
+        // Do not use official_source_url/document URL or any other fallback.
+        $discoveredFrom = trim((string)($data['discovered_from_url'] ?? $metadata['discovered_from'] ?? ''));
         if (!$this->validUrl($discoveredFrom)) return null;
 
         try {
@@ -195,7 +183,10 @@ class OfficialSupplementalEnricher
                 foreach ($jobTokens as $token) {
                     if (str_contains($haystack, $token)) $score += 20;
                 }
-                if (preg_match('#/(notice|recruitment|career|vacancy|advertisement)/#i', (string)parse_url($absolute, PHP_URL_PATH))) $score += 25;
+
+                // Prefer actual detail/notice links from the recruitment listing.
+                $path = (string)parse_url($absolute, PHP_URL_PATH);
+                if (preg_match('#/(notice|recruitment|career|vacancy|advertisement)/#i', $path)) $score += 25;
                 if (preg_match('/\b(view|details|notification|recruitment|apply)\b/i', $label)) $score += 5;
 
                 if ($score > $bestScore) {
