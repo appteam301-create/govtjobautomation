@@ -552,38 +552,34 @@ TXT;
 
     private function mergeWithVerifiedResearch(array $filled, array $research, array $targetFields): array
     {
-        $byField = [];
+        // Sonnet is authoritative. Haiku only formats values.
+        $filledByField = [];
         foreach (($filled['results'] ?? []) as $row) {
             if (!is_array($row)) continue;
             $field = (string)($row['field'] ?? '');
             if ($field !== '' && in_array($field, $targetFields, true)) {
-                $byField[$field] = $row;
+                $filledByField[$field] = $row;
             }
         }
 
-        foreach (($research['results'] ?? []) as $row) {
-            if (!is_array($row)) continue;
-            $field = (string)($row['field'] ?? '');
-            if ($field === '' || !in_array($field, $targetFields, true) || isset($byField[$field])) continue;
+        $results = [];
+        foreach (($research['results'] ?? []) as $sonnetRow) {
+            if (!is_array($sonnetRow)) continue;
+            $field = (string)($sonnetRow['field'] ?? '');
+            if ($field === '' || !in_array($field, $targetFields, true)) continue;
 
-            $confidence = (float)($row['confidence'] ?? 0);
-            $sourceKind = (string)($row['source_kind'] ?? '');
-            $sourceUrl = trim((string)($row['source_url'] ?? ''));
-            $value = $this->normalizeValue($field, $row['value'] ?? null);
+            // Use Haiku's formatted value when present, but keep every other property from Sonnet.
+            if (isset($filledByField[$field]['value'])) {
+                $sonnetRow['value'] = $filledByField[$field]['value'];
+            }
 
-            if ($confidence < 0.72 || $value === null || $value === '') continue;
-            if (!in_array($sourceKind, ['official_evidence','web_search'], true)) continue;
-            if (!$this->validUrl($sourceUrl)) continue;
-
-            $row['value'] = is_scalar($value) ? (string)$value : $value;
-            $byField[$field] = $row;
+            $results[] = $sonnetRow;
         }
 
-        $results = array_values($byField);
-        $found = array_map(fn($row) => (string)($row['field'] ?? ''), $results);
+        // Only Sonnet can declare a field unavailable.
         $notFound = array_values(array_filter(
-            array_unique(array_merge($filled['not_found'] ?? [], $research['not_found'] ?? [])),
-            fn($field) => in_array($field, $targetFields, true) && !in_array($field, $found, true)
+            array_unique($research['not_found'] ?? []),
+            fn($field) => in_array($field, $targetFields, true)
         ));
 
         return ['results'=>$results,'not_found'=>$notFound];
@@ -693,75 +689,124 @@ TXT;
         string $mode
     ): array {
         $researchResults = is_array($research['results'] ?? null) ? $research['results'] : [];
-        $researchNotFound = is_array($research['not_found'] ?? null) ? $research['not_found'] : [];
 
+        // Sonnet is the ONLY authority for verification, sources, confidence and not_found.
+        // Haiku is used only as a cheap form formatter/filler.
         if ($researchResults === []) {
-            return ['results'=>[], 'not_found'=>array_values(array_unique(array_merge($targetFields, $researchNotFound)))];
+            return ['results'=>[], 'not_found'=>[]];
+        }
+
+        $authoritative = [];
+        foreach ($researchResults as $row) {
+            if (!is_array($row)) continue;
+            $field = (string)($row['field'] ?? '');
+            if ($field === '' || !in_array($field, $targetFields, true)) continue;
+            $authoritative[$field] = $row;
+        }
+
+        if ($authoritative === []) {
+            return ['results'=>[], 'not_found'=>[]];
         }
 
         $payload = [
             'model'=>config('services.claude.fill_model','claude-haiku-5-5'),
-            'max_tokens'=>3500,
+            'max_tokens'=>2500,
             'system'=><<<'TXT'
-You are the low-cost FORM FILLING stage for an Indian government recruitment admin system.
+You are a FORM FILLER only.
 
-You receive verified research produced by a stronger research model. You MUST NOT research the web, use memory, infer missing facts, or introduce any new source.
-Your only job is to convert the supplied verified research into final form-ready field values.
+The Sonnet research supplied to you is authoritative and already verified.
+You MUST NOT verify facts, judge correctness, reject fields, perform research, infer missing information, change sources, change confidence, or decide whether a field is available.
 
-STRICT RULES:
-1. Fill ONLY the requested target fields.
-2. Never modify or suggest changes to any existing non-empty field.
-3. Use ONLY facts present in RESEARCH RESULTS.
-4. Preserve each result's source_kind, source_url, source_title, source_page, and source_excerpt.
-5. If evidence is ambiguous, unsupported, or cannot safely map to the requested field, place that field in not_found.
-6. Dates must be YYYY-MM-DD. Numeric fields must contain only a numeric value.
-7. Do not guess employment type, age minimum, vacancy count, salary, category, or any other value from convention.
-8. Return the final result ONLY by calling the submit_form_fields tool exactly once. Do not output prose or markdown.
+Your only task:
+- copy each supplied Sonnet field into a simple form-ready field/value pair;
+- normalize obvious formatting only when required by the field type;
+- never omit a supplied field intentionally;
+- never add any field that Sonnet did not supply;
+- never output not_found;
+- never use tools other than the required submit_form_fill tool.
+
+Return the result only through submit_form_fill.
 TXT,
             'messages'=>[[
                 'role'=>'user',
                 'content'=>"MODE: {$mode}\n"
                     ."TARGET FIELDS:\n".implode(', ', $targetFields)
-                    ."\n\nEXISTING FORM DATA (DO NOT OVERWRITE):\n"
-                    .json_encode($this->context($candidate,$data), JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)
-                    ."\n\nRESEARCH RESULTS FROM SONNET 5.5:\n"
-                    .json_encode(['results'=>$researchResults,'not_found'=>$researchNotFound], JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE),
+                    ."\n\nAUTHORITATIVE SONNET RESULTS:\n"
+                    .json_encode(array_values($authoritative), JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE),
             ]],
-            'tools'=>[
-                $this->structuredResultTool(
-                    'submit_form_fields',
-                    'Submit only the final validated form-ready values based on the supplied Sonnet research.'
-                ),
-            ],
+            'tools'=>[[
+                'name'=>'submit_form_fill',
+                'description'=>'Copy Sonnet-verified values into form-ready field/value pairs only.',
+                'input_schema'=>[
+                    'type'=>'object',
+                    'additionalProperties'=>false,
+                    'properties'=>[
+                        'results'=>[
+                            'type'=>'array',
+                            'items'=>[
+                                'type'=>'object',
+                                'additionalProperties'=>false,
+                                'properties'=>[
+                                    'field'=>['type'=>'string'],
+                                    'value'=>['type'=>'string'],
+                                ],
+                                'required'=>['field','value'],
+                            ],
+                        ],
+                    ],
+                    'required'=>['results'],
+                ],
+            ]],
             'tool_choice'=>[
                 'type'=>'tool',
-                'name'=>'submit_form_fields',
+                'name'=>'submit_form_fill',
                 'disable_parallel_tool_use'=>true,
             ],
         ];
 
         $body = $this->callClaude($apiKey, $payload, $candidate);
 
+        $filledPairs = [];
         try {
-            return $this->structuredOutput($body, 'submit_form_fields', $candidate);
-        } catch (RuntimeException $firstError) {
-            // One cheap formatting retry only. Reuse the same Sonnet research;
-            // no web-search tool is present in this payload, so search cannot repeat.
-            Log::warning('Claude Haiku structured output retry', [
+            foreach (($body['content'] ?? []) as $part) {
+                if (($part['type'] ?? null) !== 'tool_use' || ($part['name'] ?? null) !== 'submit_form_fill') continue;
+                $input = $part['input'] ?? null;
+                if (!is_array($input)) continue;
+                foreach (($input['results'] ?? []) as $pair) {
+                    if (!is_array($pair)) continue;
+                    $field = (string)($pair['field'] ?? '');
+                    if ($field === '' || !isset($authoritative[$field])) continue;
+                    $filledPairs[$field] = $pair['value'] ?? null;
+                }
+            }
+        } catch (Throwable $e) {
+            Log::warning('Haiku form-fill parsing failed; Sonnet fallback will be used', [
                 'candidate_id'=>$candidate->id,
-                'error'=>$firstError->getMessage(),
+                'error'=>$e->getMessage(),
             ]);
-
-            $retryPayload = $payload;
-            $retryPayload['system'] .= "\n\nCRITICAL RETRY: Return the result ONLY by calling the submit_form_fields tool exactly once. Do not output prose.";
-            $retryPayload['messages'][] = [
-                'role'=>'user',
-                'content'=>'Formatting retry only. Use exactly the supplied research. Call submit_form_fields once with valid structured input.',
-            ];
-
-            $retryBody = $this->callClaude($apiKey, $retryPayload, $candidate);
-            return $this->structuredOutput($retryBody, 'submit_form_fields', $candidate);
         }
+
+        // Build final rows from Sonnet authority.
+        // Haiku may only provide the final display/form value; all other metadata remains Sonnet's.
+        $results = [];
+        foreach ($authoritative as $field=>$sonnetRow) {
+            $value = array_key_exists($field, $filledPairs)
+                ? $filledPairs[$field]
+                : ($sonnetRow['value'] ?? null);
+
+            $normalized = $this->normalizeValue($field, $value);
+            if ($normalized === null || $normalized === '') {
+                // If Haiku formatting was unusable, fall back to Sonnet's original verified value.
+                $normalized = $this->normalizeValue($field, $sonnetRow['value'] ?? null);
+            }
+            if ($normalized === null || $normalized === '') continue;
+
+            $row = $sonnetRow;
+            $row['value'] = is_scalar($normalized) ? (string)$normalized : $normalized;
+            $results[] = $row;
+        }
+
+        return ['results'=>$results, 'not_found'=>[]];
     }
 
     private function callClaude(string $apiKey, array $payload, JobCandidate $candidate): array
