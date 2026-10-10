@@ -82,6 +82,7 @@ class ProcessDiscoveredDocument implements ShouldQueue
 
         $vacancies = $this->findVacancyCount($raw);
         $applyUrl = $this->findApplyUrl($raw);
+        $logoUrl = $this->resolveOfficialLogo($source, $metadata, $doc);
 
         $model = new JobCandidate();
         $columns = Schema::getColumnListing($model->getTable());
@@ -94,6 +95,7 @@ class ProcessDiscoveredDocument implements ShouldQueue
             'total_vacancies' => $vacancies,
             'application_last_date' => $lastDate,
             'application_url' => $applyUrl,
+            'logo' => $logoUrl,
             'notification_pdf_url' => ($doc->document_type ?? '') === 'pdf' ? (string)$doc->url : null,
             'official_source_url' => (string)$doc->url,
             'confidence_score' => $this->confidence($jobTitle, $raw, $vacancies, $lastDate),
@@ -105,6 +107,7 @@ class ProcessDiscoveredDocument implements ShouldQueue
                 'total_vacancies' => $vacancies,
                 'application_end_date' => $lastDate,
                 'apply_url' => $applyUrl,
+                'logo' => $logoUrl,
                 'official_notification_url' => (string)$doc->url,
                 'source_name' => $source->name,
                 'source_url' => $source->recruitment_url,
@@ -204,6 +207,166 @@ class ProcessDiscoveredDocument implements ShouldQueue
         $text = preg_replace('/[ \t]+/u', ' ', $text);
         $text = preg_replace('/\\R{3,}/u', "\n\n", (string)$text);
         return trim((string)$text);
+    }
+
+    private function resolveOfficialLogo(GovernmentSource $source, array $metadata, DiscoveredDocument $doc): ?string
+    {
+        $settings = is_array($source->settings) ? $source->settings : [];
+        $cached = trim((string)($settings['official_logo_url'] ?? ''));
+        $officialHost = $this->hostOf((string)$source->recruitment_url);
+
+        if ($cached !== '' && $this->isOfficialAssetUrl($cached, $officialHost)) {
+            return $cached;
+        }
+
+        $pageCandidates = array_values(array_unique(array_filter([
+            (string)($metadata['discovered_from'] ?? ''),
+            (string)$source->recruitment_url,
+            (($doc->document_type ?? '') === 'html' ? (string)$doc->url : ''),
+        ], fn($url) => filter_var($url, FILTER_VALIDATE_URL) !== false)));
+
+        foreach ($pageCandidates as $pageUrl) {
+            $pageHost = $this->hostOf($pageUrl);
+            if ($officialHost !== '' && !$this->sameOfficialHost($pageHost, $officialHost)) continue;
+
+            try {
+                $response = Http::withHeaders([
+                    'User-Agent' => config('govjobs.crawler.user_agent'),
+                    'Accept' => 'text/html,application/xhtml+xml,*/*;q=0.8',
+                    'Accept-Language' => 'en-IN,en;q=0.9',
+                ])->timeout(8)->get($pageUrl);
+
+                if (!$response->successful()) continue;
+
+                $contentType = strtolower((string)$response->header('Content-Type'));
+                if ($contentType !== '' && !str_contains($contentType, 'html')) continue;
+
+                $logo = $this->extractLogoFromHtml($response->body(), $pageUrl, $officialHost ?: $pageHost);
+                if (!$logo) continue;
+
+                // Cache one official logo per government source/site so repeated jobs
+                // from the same official website do not re-fetch the logo every time.
+                $settings['official_logo_url'] = $logo;
+                $settings['official_logo_source_page'] = $pageUrl;
+                $settings['official_logo_checked_at'] = now()->toIso8601String();
+                $source->settings = $settings;
+                $source->save();
+
+                return $logo;
+            } catch (Throwable $e) {
+                // Logo extraction must never break job discovery.
+            }
+        }
+
+        return null;
+    }
+
+    private function extractLogoFromHtml(string $html, string $pageUrl, string $officialHost): ?string
+    {
+        $candidates = [];
+
+        // Highest priority: images explicitly identified as logo/brand/emblem in header/site markup.
+        if (preg_match_all('#<img\b[^>]*>#i', $html, $matches)) {
+            foreach ($matches[0] as $tag) {
+                $src = $this->htmlAttribute($tag, 'src');
+                if (!$src) $src = $this->htmlAttribute($tag, 'data-src');
+                if (!$src) continue;
+
+                $hint = strtolower(implode(' ', array_filter([
+                    $this->htmlAttribute($tag, 'class'),
+                    $this->htmlAttribute($tag, 'id'),
+                    $this->htmlAttribute($tag, 'alt'),
+                    $this->htmlAttribute($tag, 'title'),
+                    $src,
+                ])));
+
+                $score = 0;
+                if (preg_match('/\b(logo|site-logo|brand|emblem|crest|identity)\b/i', $hint)) $score += 100;
+                if (preg_match('/\b(header|branding|navbar|masthead)\b/i', $hint)) $score += 25;
+                if (preg_match('/\b(banner|slider|gallery|thumbnail|avatar|photo)\b/i', $hint)) $score -= 80;
+
+                if ($score > 0) $candidates[] = [$score, $src];
+            }
+        }
+
+        // Metadata often exposes the site's identity image. Keep below explicit logo markup.
+        foreach ([
+            ['pattern'=>'#<meta\b[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\'][^>]*>#i','score'=>55],
+            ['pattern'=>'#<meta\b[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\'][^>]*>#i','score'=>55],
+        ] as $rule) {
+            if (preg_match($rule['pattern'], $html, $m)) $candidates[] = [$rule['score'], $m[1]];
+        }
+
+        // Favicon/site icon is a valid fallback when no larger official logo is exposed.
+        if (preg_match_all('#<link\b[^>]*>#i', $html, $links)) {
+            foreach ($links[0] as $tag) {
+                $rel = strtolower((string)$this->htmlAttribute($tag, 'rel'));
+                if (!str_contains($rel, 'icon')) continue;
+                $href = $this->htmlAttribute($tag, 'href');
+                if ($href) $candidates[] = [25, $href];
+            }
+        }
+
+        usort($candidates, fn($a,$b) => $b[0] <=> $a[0]);
+
+        foreach ($candidates as [, $rawUrl]) {
+            $absolute = $this->absoluteUrl($rawUrl, $pageUrl);
+            if (!$absolute) continue;
+            if (!$this->isOfficialAssetUrl($absolute, $officialHost)) continue;
+            return $absolute;
+        }
+
+        return null;
+    }
+
+    private function htmlAttribute(string $tag, string $name): ?string
+    {
+        if (preg_match('/\b'.preg_quote($name,'/').'\s*=\s*(["\'])(.*?)\1/is', $tag, $m)) {
+            $value = trim(html_entity_decode($m[2], ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            return $value !== '' ? $value : null;
+        }
+        return null;
+    }
+
+    private function absoluteUrl(string $url, string $baseUrl): ?string
+    {
+        $url = trim(html_entity_decode($url, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        if ($url === '' || str_starts_with($url, 'data:') || str_starts_with($url, 'javascript:')) return null;
+        if (filter_var($url, FILTER_VALIDATE_URL)) return $url;
+
+        $scheme = (string)(parse_url($baseUrl, PHP_URL_SCHEME) ?: 'https');
+        $host = (string)parse_url($baseUrl, PHP_URL_HOST);
+        if ($host === '') return null;
+
+        if (str_starts_with($url, '//')) return $scheme.':'.$url;
+        if (str_starts_with($url, '/')) return $scheme.'://'.$host.$url;
+
+        $path = (string)(parse_url($baseUrl, PHP_URL_PATH) ?: '/');
+        $dir = rtrim(str_replace('\\','/',dirname($path)), '/');
+        return $scheme.'://'.$host.($dir !== '' ? $dir : '').'/'.$url;
+    }
+
+    private function hostOf(string $url): string
+    {
+        return strtolower((string)(parse_url($url, PHP_URL_HOST) ?: ''));
+    }
+
+    private function sameOfficialHost(string $a, string $b): bool
+    {
+        $a = preg_replace('/^www\./i','',strtolower($a));
+        $b = preg_replace('/^www\./i','',strtolower($b));
+        if ($a === '' || $b === '') return false;
+        return $a === $b || str_ends_with($a, '.'.$b) || str_ends_with($b, '.'.$a);
+    }
+
+    private function isOfficialAssetUrl(string $url, string $officialHost): bool
+    {
+        if (!filter_var($url, FILTER_VALIDATE_URL)) return false;
+        $scheme = strtolower((string)parse_url($url, PHP_URL_SCHEME));
+        if (!in_array($scheme, ['http','https'], true)) return false;
+
+        $assetHost = $this->hostOf($url);
+        return $officialHost !== '' && $this->sameOfficialHost($assetHost, $officialHost);
     }
 
     private function findVacancyCount(string $text): ?int
