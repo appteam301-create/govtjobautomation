@@ -53,7 +53,7 @@ class JobMissingDataFetcher
             $candidate
         );
 
-        $research = $this->structuredOutput($body);
+        $research = $this->structuredOutput($body, 'submit_job_research', $candidate);
         $searchedUrls = $this->sourceUrls($body);
         $webSearchesUsed = (int) data_get($body, 'usage.server_tool_use.web_search_requests', 0);
 
@@ -203,7 +203,7 @@ class JobMissingDataFetcher
             $candidate
         );
 
-        $research = $this->structuredOutput($body);
+        $research = $this->structuredOutput($body, 'submit_job_research', $candidate);
         $searchedUrls = $this->sourceUrls($body);
         $webSearchesUsed = (int) data_get($body, 'usage.server_tool_use.web_search_requests', 0);
 
@@ -405,8 +405,7 @@ STRICT RETRY RULES:
 5. Prefer official government/recruitment sources in search results.
 6. Never guess or infer unsupported values. If not verified, put the field in not_found.
 7. Every result requires a supporting source URL and source_kind "official_evidence" or "web_search".
-8. Return ONLY valid JSON:
-{"results":[{"field":"...","value":"...","confidence":0.0,"source_kind":"official_evidence|web_search","source_url":"...","source_title":"...","source_page":null,"source_excerpt":"..."}],"not_found":["field_name"]}
+8. After retry research is complete, call the submit_job_research tool EXACTLY ONCE with the complete structured result. Do not return the final result as prose or markdown.
 TXT;
 
         return [
@@ -420,16 +419,22 @@ TXT;
                     ."\n\nSOURCE UNAVAILABLE FIELDS TO RETRY ONLY:\n".implode(', ', $retryFields)
                     ."\n\nOFFICIAL/RELATED SOURCES TO CHECK FIRST:\n".$officialText,
             ]],
-            'tools'=>[[
-                'type'=>'web_search_20250305',
-                'name'=>'web_search',
-                'max_uses'=>1,
-                'user_location'=>[
-                    'type'=>'approximate',
-                    'country'=>'IN',
-                    'timezone'=>'Asia/Kolkata',
+            'tools'=>[
+                [
+                    'type'=>'web_search_20250305',
+                    'name'=>'web_search',
+                    'max_uses'=>1,
+                    'user_location'=>[
+                        'type'=>'approximate',
+                        'country'=>'IN',
+                        'timezone'=>'Asia/Kolkata',
+                    ],
                 ],
-            ]],
+                $this->structuredResultTool(
+                    'submit_job_research',
+                    'Submit the final verified retry research for the unavailable job fields.'
+                ),
+            ],
         ];
     }
 
@@ -537,6 +542,46 @@ TXT;
         ];
     }
 
+    private function structuredResultTool(string $name, string $description): array
+    {
+        return [
+            'name'=>$name,
+            'description'=>$description,
+            'input_schema'=>[
+                'type'=>'object',
+                'additionalProperties'=>false,
+                'properties'=>[
+                    'results'=>[
+                        'type'=>'array',
+                        'items'=>[
+                            'type'=>'object',
+                            'additionalProperties'=>false,
+                            'properties'=>[
+                                'field'=>['type'=>'string'],
+                                'value'=>['type'=>'string'],
+                                'confidence'=>['type'=>'number','minimum'=>0,'maximum'=>1],
+                                'source_kind'=>['type'=>'string','enum'=>['official_evidence','web_search']],
+                                'source_url'=>['type'=>'string'],
+                                'source_title'=>['type'=>'string'],
+                                'source_page'=>['type'=>['string','null']],
+                                'source_excerpt'=>['type'=>'string'],
+                            ],
+                            'required'=>[
+                                'field','value','confidence','source_kind','source_url',
+                                'source_title','source_page','source_excerpt'
+                            ],
+                        ],
+                    ],
+                    'not_found'=>[
+                        'type'=>'array',
+                        'items'=>['type'=>'string'],
+                    ],
+                ],
+                'required'=>['results','not_found'],
+            ],
+        ];
+    }
+
     private function payload(JobCandidate $candidate, array $data, array $missing, ?array $official): array
     {
         $officialText = $official !== null
@@ -556,8 +601,7 @@ STRICT RULES:
 7. Every result must include its source. Set source_kind to "official_evidence" when supported by the supplied official evidence, or "web_search" when supported by a web result.
 8. For web_search results, source_url must be the actual supporting URL returned by web search.
 9. Dates must be YYYY-MM-DD. Numeric fields must contain only the numeric value.
-10. Return ONLY valid JSON with this shape:
-{"results":[{"field":"...","value":"...","confidence":0.0,"source_kind":"official_evidence|web_search","source_url":"...","source_title":"...","source_page":null,"source_excerpt":"..."}],"not_found":["field_name"]}
+10. After research is complete, call the submit_job_research tool EXACTLY ONCE with the complete structured result. Do not return the final result as prose or markdown.
 TXT;
 
         return [
@@ -571,16 +615,22 @@ TXT;
                     ."\n\nPENDING FIELDS TO FILL:\n".implode(', ', $missing)
                     ."\n\n".$officialText,
             ]],
-            'tools'=>[[
-                'type'=>'web_search_20250305',
-                'name'=>'web_search',
-                'max_uses'=>2,
-                'user_location'=>[
-                    'type'=>'approximate',
-                    'country'=>'IN',
-                    'timezone'=>'Asia/Kolkata',
+            'tools'=>[
+                [
+                    'type'=>'web_search_20250305',
+                    'name'=>'web_search',
+                    'max_uses'=>2,
+                    'user_location'=>[
+                        'type'=>'approximate',
+                        'country'=>'IN',
+                        'timezone'=>'Asia/Kolkata',
+                    ],
                 ],
-            ]],
+                $this->structuredResultTool(
+                    'submit_job_research',
+                    'Submit the final verified research for all requested missing job fields.'
+                ),
+            ],
         ];
     }
 
@@ -616,8 +666,7 @@ STRICT RULES:
 5. If evidence is ambiguous, unsupported, or cannot safely map to the requested field, place that field in not_found.
 6. Dates must be YYYY-MM-DD. Numeric fields must contain only a numeric value.
 7. Do not guess employment type, age minimum, vacancy count, salary, category, or any other value from convention.
-8. Return ONLY valid JSON:
-{"results":[{"field":"...","value":"...","confidence":0.0,"source_kind":"official_evidence|web_search","source_url":"...","source_title":"...","source_page":null,"source_excerpt":"..."}],"not_found":["field_name"]}
+8. Return the final result ONLY by calling the submit_form_fields tool exactly once. Do not output prose or markdown.
 TXT,
             'messages'=>[[
                 'role'=>'user',
@@ -628,10 +677,41 @@ TXT,
                     ."\n\nRESEARCH RESULTS FROM SONNET 5.5:\n"
                     .json_encode(['results'=>$researchResults,'not_found'=>$researchNotFound], JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE),
             ]],
+            'tools'=>[
+                $this->structuredResultTool(
+                    'submit_form_fields',
+                    'Submit only the final validated form-ready values based on the supplied Sonnet research.'
+                ),
+            ],
+            'tool_choice'=>[
+                'type'=>'tool',
+                'name'=>'submit_form_fields',
+                'disable_parallel_tool_use'=>true,
+            ],
         ];
 
         $body = $this->callClaude($apiKey, $payload, $candidate);
-        return $this->structuredOutput($body);
+
+        try {
+            return $this->structuredOutput($body, 'submit_form_fields', $candidate);
+        } catch (RuntimeException $firstError) {
+            // One cheap formatting retry only. Reuse the same Sonnet research;
+            // no web-search tool is present in this payload, so search cannot repeat.
+            Log::warning('Claude Haiku structured output retry', [
+                'candidate_id'=>$candidate->id,
+                'error'=>$firstError->getMessage(),
+            ]);
+
+            $retryPayload = $payload;
+            $retryPayload['system'] .= "\n\nCRITICAL RETRY: Return the result ONLY by calling the submit_form_fields tool exactly once. Do not output prose.";
+            $retryPayload['messages'][] = [
+                'role'=>'user',
+                'content'=>'Formatting retry only. Use exactly the supplied research. Call submit_form_fields once with valid structured input.',
+            ];
+
+            $retryBody = $this->callClaude($apiKey, $retryPayload, $candidate);
+            return $this->structuredOutput($retryBody, 'submit_form_fields', $candidate);
+        }
     }
 
     private function callClaude(string $apiKey, array $payload, JobCandidate $candidate): array
@@ -674,8 +754,27 @@ TXT,
         return $body;
     }
 
-    private function structuredOutput(array $body): array
-    {
+    private function structuredOutput(
+        array $body,
+        ?string $expectedTool = null,
+        ?JobCandidate $candidate = null
+    ): array {
+        if ($expectedTool !== null) {
+            foreach (($body['content'] ?? []) as $part) {
+                if (($part['type'] ?? null) !== 'tool_use') continue;
+                if (($part['name'] ?? null) !== $expectedTool) continue;
+
+                $input = $part['input'] ?? null;
+                if (!is_array($input)) continue;
+
+                $input['results'] = is_array($input['results'] ?? null) ? $input['results'] : [];
+                $input['not_found'] = is_array($input['not_found'] ?? null) ? $input['not_found'] : [];
+                return $input;
+            }
+        }
+
+        // Compatibility fallback only: parse text if an older/model response ignored
+        // the structured tool instruction. Never trigger another Sonnet/web search here.
         $parts = [];
         foreach (($body['content'] ?? []) as $part) {
             if (($part['type'] ?? null) === 'text' && is_string($part['text'] ?? null)) {
@@ -684,27 +783,35 @@ TXT,
         }
 
         $text = trim(implode("\n", $parts));
-        if ($text === '') {
-            throw new RuntimeException('Claude returned no structured data.');
+        if ($text !== '') {
+            $clean = preg_replace('/^\`\`\`(?:json)?\s*|\s*\`\`\`$/i', '', $text) ?? $text;
+            $start = strpos($clean, '{');
+            $end = strrpos($clean, '}');
+
+            if ($start !== false && $end !== false && $end >= $start) {
+                $clean = substr($clean, $start, $end - $start + 1);
+                try {
+                    $decoded = json_decode($clean, true, flags:JSON_THROW_ON_ERROR);
+                    if (is_array($decoded)) {
+                        $decoded['results'] = is_array($decoded['results'] ?? null) ? $decoded['results'] : [];
+                        $decoded['not_found'] = is_array($decoded['not_found'] ?? null) ? $decoded['not_found'] : [];
+                        return $decoded;
+                    }
+                } catch (Throwable $e) {
+                    // Log below with a short, secret-safe response excerpt.
+                }
+            }
         }
 
-        $text = preg_replace('/^\`\`\`(?:json)?\s*|\s*\`\`\`$/i', '', $text) ?? $text;
-        $start = strpos($text, '{');
-        $end = strrpos($text, '}');
-        if ($start !== false && $end !== false && $end >= $start) {
-            $text = substr($text, $start, $end - $start + 1);
-        }
+        Log::warning('Claude returned invalid structured data', [
+            'candidate_id'=>$candidate?->id,
+            'expected_tool'=>$expectedTool,
+            'stop_reason'=>$body['stop_reason'] ?? null,
+            'model'=>$body['model'] ?? null,
+            'response_excerpt'=>Str::limit($text, 1200),
+        ]);
 
-        try {
-            $decoded = json_decode($text, true, flags:JSON_THROW_ON_ERROR);
-        } catch (Throwable $e) {
-            throw new RuntimeException('Claude returned invalid structured data.', previous:$e);
-        }
-
-        if (!is_array($decoded)) $decoded = [];
-        $decoded['results'] = is_array($decoded['results'] ?? null) ? $decoded['results'] : [];
-        $decoded['not_found'] = is_array($decoded['not_found'] ?? null) ? $decoded['not_found'] : [];
-        return $decoded;
+        throw new RuntimeException('Claude returned invalid structured data.');
     }
 
     private function sourceUrls(array $body): array
