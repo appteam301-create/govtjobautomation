@@ -36,6 +36,16 @@ class JobDetailsController extends Controller
 
             $candidate->refresh();
             $result['supplemental_updated_fields'] = $supplementalResult['updated_fields'] ?? [];
+
+            // A supplemental official-source backfill can resolve a field that Claude
+            // previously reported as not_found. Do not show contradictory status.
+            if (!empty($result['supplemental_updated_fields']) && is_array($result['not_found'] ?? null)) {
+                $result['not_found'] = array_values(array_diff(
+                    $result['not_found'],
+                    $result['supplemental_updated_fields']
+                ));
+            }
+
             $result['previous_question_papers_count'] = count(
                 is_array(($candidate->extracted_data ?? [])['previous_question_papers'] ?? null)
                     ? $candidate->extracted_data['previous_question_papers']
