@@ -7,7 +7,7 @@ use Carbon\Carbon;
 class JobDetailsEnricher
 {
     public const FIELDS = [
-        'job_title','organization','department','description','employment_type','job_category',
+        'job_title','organization','department','description','employment_type','job_category','logo',
         'qualification','experience_required','total_vacancies','age_minimum','age_maximum',
         'age_relaxation_details','salary_minimum','salary_maximum','salary_type','pay_scale',
         'application_fee','fee_details','state','city','job_location','application_start_date',
@@ -30,6 +30,7 @@ class JobDetailsEnricher
             'application_end_date' => $this->dateString($candidate->application_last_date),
             'apply_url' => $candidate->application_url,
             'official_notification_url' => $candidate->notification_pdf_url ?: $candidate->official_source_url,
+            'logo' => $data['logo'] ?? (isset($candidate->logo) ? $candidate->logo : null),
             'featured_job' => false,
             'urgent_hiring' => false,
         ];
