@@ -20,16 +20,16 @@ class PreviousQuestionPaperFinder
             ? DiscoveredDocument::find($candidate->discovered_document_id)
             : null;
 
-        if (!$source || !$document) return;
+        if (!$source) return;
 
-        $metadata = is_array($document->metadata) ? $document->metadata : [];
+        $metadata = $document && is_array($document->metadata) ? $document->metadata : [];
         $this->findAndStore($candidate, $source, $document, $metadata);
     }
 
     public function findAndStore(
         JobCandidate $candidate,
         GovernmentSource $source,
-        DiscoveredDocument $document,
+        ?DiscoveredDocument $document,
         array $metadata = []
     ): void {
         $data = is_array($candidate->extracted_data) ? $candidate->extracted_data : [];
@@ -159,12 +159,12 @@ class PreviousQuestionPaperFinder
                 $year = $this->extractYear($haystack, $years);
                 if (!$year) continue;
                 if (!$this->looksRelatedToJob($haystack, $identityTokens)) continue;
-                if (!$this->isPdfUrl($absolute)) continue;
 
                 $papers[] = [
                     'year'=>$year,
                     'title'=>$label !== '' ? Str::limit($label, 220, '') : ((string)$candidate->job_title.' '.$year.' Question Paper'),
-                    'pdf_url'=>$absolute,
+                    'paper_url'=>$absolute,
+                    'pdf_url'=>$this->isPdfUrl($absolute) ? $absolute : null,
                     'source_url'=>$pageUrl,
                     'source_title'=>'Official source archive/page',
                     'source_type'=>'official_archive',
@@ -206,7 +206,7 @@ STRICT RULES:
 4. A result must be an actual question-paper PDF for the same post/exam, not a syllabus, answer key, notification, model unrelated test, coaching article, or generic sample.
 5. If an exact paper cannot be verified for a year, omit it. Never guess.
 6. Return at most one best paper per requested year.
-7. Provide the direct PDF URL plus the page/source URL that supports it.
+7. Provide the direct question-paper PDF or page URL plus the page/source URL that supports it.
 8. Use the submit_question_papers tool exactly once after research.
 TXT;
 
@@ -252,12 +252,12 @@ TXT;
                                     'properties'=>[
                                         'year'=>['type'=>'integer'],
                                         'title'=>['type'=>'string'],
-                                        'pdf_url'=>['type'=>'string'],
+                                        'paper_url'=>['type'=>'string'],
                                         'source_url'=>['type'=>'string'],
                                         'source_title'=>['type'=>'string'],
                                         'confidence'=>['type'=>'number','minimum'=>0,'maximum'=>1],
                                     ],
-                                    'required'=>['year','title','pdf_url','source_url','source_title','confidence'],
+                                    'required'=>['year','title','paper_url','source_url','source_title','confidence'],
                                 ],
                             ],
                         ],
@@ -308,14 +308,13 @@ TXT;
                     if (!is_array($row)) continue;
 
                     $year = (int)($row['year'] ?? 0);
-                    $pdfUrl = trim((string)($row['pdf_url'] ?? ''));
+                    $paperUrl = trim((string)($row['paper_url'] ?? ''));
                     $sourceUrl = trim((string)($row['source_url'] ?? ''));
                     $confidence = (float)($row['confidence'] ?? 0);
 
                     if (!in_array($year, $missingYears, true)) continue;
                     if ($confidence < 0.82) continue;
-                    if (!$this->validUrl($pdfUrl) || !$this->validUrl($sourceUrl)) continue;
-                    if (!$this->isPdfUrl($pdfUrl)) continue;
+                    if (!$this->validUrl($paperUrl) || !$this->validUrl($sourceUrl)) continue;
 
                     $normalizedSource = $this->normalizeUrl($sourceUrl);
                     if ($searchedUrls !== [] && !in_array($normalizedSource, $searchedUrls, true)) continue;
@@ -323,7 +322,8 @@ TXT;
                     $papers[] = [
                         'year'=>$year,
                         'title'=>Str::limit(trim((string)($row['title'] ?? 'Previous Year Question Paper')), 220, ''),
-                        'pdf_url'=>$pdfUrl,
+                        'paper_url'=>$paperUrl,
+                        'pdf_url'=>$this->isPdfUrl($paperUrl) ? $paperUrl : null,
                         'source_url'=>$sourceUrl,
                         'source_title'=>Str::limit(trim((string)($row['source_title'] ?? 'Web search source')), 220, ''),
                         'source_type'=>'sonnet_web_search',
@@ -392,7 +392,7 @@ TXT;
         foreach ($papers as $paper) {
             if (!is_array($paper)) continue;
             $year = (int)($paper['year'] ?? 0);
-            $url = trim((string)($paper['pdf_url'] ?? ''));
+            $url = trim((string)($paper['paper_url'] ?? $paper['pdf_url'] ?? ''));
             if ($year <= 0 || !$this->validUrl($url)) continue;
 
             $key = $year.'|'.$this->normalizeUrl($url);
