@@ -44,19 +44,52 @@ class JobMissingDataFetcher
             ];
         }
 
-        // Strict flow: PDF first -> official source page fallback.
-        // If official evidence is usable, Sonnet gets NO web-search tool.
-        // Web search (max 2) is exposed only when official evidence is unavailable/unreadable.
+        // Official-first fallback flow:
+        // 1) PDF first, then official source page fallback.
+        // 2) Keep everything Sonnet verifies from official evidence.
+        // 3) For STILL unresolved fields only, run one Sonnet web-search stage (max_uses=2).
         $officialBundle = $this->officialEvidenceBundle($candidate, $data);
-        $body = $this->callClaude(
-            $apiKey,
-            $this->payload($candidate, $data, $missing, $officialBundle),
-            $candidate
-        );
+        $searchedUrls = [];
+        $webSearchesUsed = 0;
 
-        $research = $this->structuredOutput($body, 'submit_job_research', $candidate);
-        $searchedUrls = $this->sourceUrls($body);
-        $webSearchesUsed = (int) data_get($body, 'usage.server_tool_use.web_search_requests', 0);
+        if ($officialBundle !== []) {
+            $officialBody = $this->callClaude(
+                $apiKey,
+                $this->payload($candidate, $data, $missing, $officialBundle),
+                $candidate
+            );
+            $officialResearch = $this->structuredOutput($officialBody, 'submit_job_research', $candidate);
+
+            $officialFound = array_values(array_unique(array_filter(array_map(
+                fn($row) => is_array($row) ? (string)($row['field'] ?? '') : '',
+                $officialResearch['results'] ?? []
+            ))));
+            $unresolved = array_values(array_diff($missing, $officialFound));
+
+            if ($unresolved !== []) {
+                $searchBody = $this->callClaude(
+                    $apiKey,
+                    $this->webSearchPayload($candidate, $data, $unresolved),
+                    $candidate
+                );
+                $searchResearch = $this->structuredOutput($searchBody, 'submit_job_research', $candidate);
+                $searchedUrls = $this->sourceUrls($searchBody);
+                $webSearchesUsed = (int) data_get($searchBody, 'usage.server_tool_use.web_search_requests', 0);
+
+                $research = $this->combineSonnetResearch($officialResearch, $searchResearch, $missing);
+            } else {
+                $research = $officialResearch;
+            }
+        } else {
+            $searchBody = $this->callClaude(
+                $apiKey,
+                $this->webSearchPayload($candidate, $data, $missing),
+                $candidate
+            );
+            $research = $this->structuredOutput($searchBody, 'submit_job_research', $candidate);
+            $searchedUrls = $this->sourceUrls($searchBody);
+            $webSearchesUsed = (int) data_get($searchBody, 'usage.server_tool_use.web_search_requests', 0);
+        }
 
         // Stage 2: cheap Haiku pass converts Sonnet research into final form-ready values.
         // No tools are exposed to Haiku, so all web research remains on Sonnet.
@@ -139,9 +172,9 @@ class JobMissingDataFetcher
                 'source_url'=>null,
                 'source_title'=>'Source unavailable',
                 'source_page'=>null,
-                'reference'=>$officialBundle !== []
-                    ? 'Reliable information could not be verified from the official evidence.'
-                    : 'Reliable information could not be verified from the permitted web searches.',
+                'reference'=>$webSearchesUsed > 0
+                    ? 'Reliable information could not be verified from official evidence or the permitted web searches.'
+                    : 'Reliable information could not be verified from the official evidence.',
                 'confidence'=>null,
                 'needs_admin_approval'=>false,
                 'checked_at'=>now()->toIso8601String(),
@@ -167,7 +200,9 @@ class JobMissingDataFetcher
             'fetched_count'=>count($accepted),
             'fetched_fields'=>$accepted,
             'not_found'=>$notFound,
-            'source_mode'=>$officialBundle !== [] ? 'official_evidence_first' : 'web_search_only',
+            'source_mode'=>$officialBundle !== []
+                ? ($webSearchesUsed > 0 ? 'official_then_web_search' : 'official_evidence_first')
+                : 'web_search_only',
             'web_searches_used'=>$webSearchesUsed,
             'requires_admin_approval'=>count($accepted) > 0,
         ];
@@ -720,6 +755,75 @@ TXT;
                     ."\n\n".$officialText,
             ]],
             'tools'=>$tools,
+        ];
+    }
+
+    private function combineSonnetResearch(array $official, array $web, array $targetFields): array
+    {
+        $resultsByField = [];
+
+        // Official evidence wins when both stages return the same field.
+        foreach ([$official['results'] ?? [], $web['results'] ?? []] as $rows) {
+            foreach ($rows as $row) {
+                if (!is_array($row)) continue;
+                $field = (string)($row['field'] ?? '');
+                if ($field === '' || !in_array($field, $targetFields, true)) continue;
+                if (!isset($resultsByField[$field])) $resultsByField[$field] = $row;
+            }
+        }
+
+        $found = array_keys($resultsByField);
+        $notFound = array_values(array_filter(
+            $targetFields,
+            fn($field) => !in_array($field, $found, true)
+        ));
+
+        return ['results'=>array_values($resultsByField), 'not_found'=>$notFound];
+    }
+
+    private function webSearchPayload(JobCandidate $candidate, array $data, array $missing): array
+    {
+        $system = <<<'TXT'
+You extract Indian government recruitment facts for an admin review system.
+
+WEB-SEARCH FALLBACK MODE:
+1. These fields remain unresolved after official notification/source evidence was checked.
+2. Search ONLY for the listed unresolved fields.
+3. Use Claude web search and prefer official government/recruitment sources.
+4. Group all unresolved fields into as few searches as possible. Never exceed the configured maximum of 2 web searches.
+5. Never overwrite or propose changes to existing non-empty values.
+6. Never guess or invent values. If a field cannot be reliably verified, put it in not_found.
+7. Every returned field must have source_kind "web_search" and an actual supporting source URL.
+8. Dates must be YYYY-MM-DD. Numeric fields must contain only the numeric value.
+9. Call submit_job_research EXACTLY ONCE with the complete structured result.
+TXT;
+
+        return [
+            'model'=>config('services.claude.research_model','claude-sonnet-5-5'),
+            'max_tokens'=>7000,
+            'system'=>$system,
+            'messages'=>[[
+                'role'=>'user',
+                'content'=>"Job context:\n"
+                    .json_encode($this->context($candidate,$data), JSON_PRETTY_PRINT|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)
+                    ."\n\nUNRESOLVED FIELDS TO SEARCH:\n".implode(', ', $missing),
+            ]],
+            'tools'=>[
+                [
+                    'type'=>'web_search_20250305',
+                    'name'=>'web_search',
+                    'max_uses'=>2,
+                    'user_location'=>[
+                        'type'=>'approximate',
+                        'country'=>'IN',
+                        'timezone'=>'Asia/Kolkata',
+                    ],
+                ],
+                $this->structuredResultTool(
+                    'submit_job_research',
+                    'Submit the final verified web-search results for the unresolved job fields.'
+                ),
+            ],
         ];
     }
 
